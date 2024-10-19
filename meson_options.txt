@@ -1,0 +1,18 @@
+option(
+    'payload',
+    type: 'string',
+    value: '',
+    description: 'Path to the payload to embed',
+)
+option(
+    'aes_key',
+    type: 'string',
+    value: '11223344556677889900aabbccddeeff',
+    description: 'AES key to use for payload encryption/decryption',
+)
+option(
+    'mlock_or_die',
+    type: 'boolean',
+    value: true,
+    description: 'Exit if swapping behavior cannot be disabled',
+)
