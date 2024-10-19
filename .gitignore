@@ -1,0 +1,4 @@
+builddir/
+.vscode/
+subprojects/packagecache
+subprojects/tinyaes
