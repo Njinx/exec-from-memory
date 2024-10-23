@@ -37,7 +37,7 @@ packed = custom_target(
 )
 
 deps = []
-cflags = []
+cflags = ['-fno-stack-protector']
 ldflags = ['-static']
 
 tinyaes_proj = cmake.subproject('tinyaes')
@@ -48,7 +48,7 @@ configure_file(input: 'config.h.in', output: 'config.h', configuration: conf)
 
 executable(
     'executor',
-    ['main.c', packed],
+    ['main.c', 'execve.c', 'execve.h', 'exec_jmp.s', packed],
     dependencies: deps,
     c_args: cflags,
     link_args: ldflags,

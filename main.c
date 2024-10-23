@@ -10,14 +10,13 @@
 #include <unistd.h>
 
 #include "config.h"
+#include "execve.h"
 #include "payload.h"
 
-void aes_decrypt(unsigned char **plaintext, size_t plaintext_len);
-int main(int argc, char *argv[], char *envp[]);
+void aes_decrypt(unsigned char** plaintext, size_t plaintext_len);
+int main(int argc, char* argv[], char* envp[]);
 
-extern void parse_elf(const unsigned char *bytes);
-
-void aes_decrypt(unsigned char **plaintext, size_t plaintext_len)
+void aes_decrypt(unsigned char** plaintext, size_t plaintext_len)
 {
     int i = 0;
     struct AES_ctx ctx;
@@ -48,41 +47,60 @@ void aes_decrypt(unsigned char **plaintext, size_t plaintext_len)
     }
 }
 
-int main(int argc, char *argv[], char *envp[])
+int main(int argc, char* argv[], char* envp[])
 {
-    int dst_fd;
-    unsigned char *plaintext;
-    int err;
+    // int dst_fd;
+    unsigned char* plaintext;
+    // int err;
 
-    if ((dst_fd = memfd_create("memfd", MFD_CLOEXEC)) < 0) {
-        perror("memfd_create()");
-        exit(errno);
-    }
+    // if ((dst_fd = memfd_create("memfd", MFD_CLOEXEC)) < 0) {
+    //     perror("memfd_create()");
+    //     exit(errno);
+    // }
 
-    if (ftruncate(dst_fd, plaintext_len) < 0) {
-        perror("ftruncate()");
-        exit(errno);
-    }
+    // if (ftruncate(dst_fd, plaintext_len) < 0) {
+    //     perror("ftruncate()");
+    //     exit(errno);
+    // }
 
-    plaintext = mmap(NULL, plaintext_len,
-        PROT_READ | PROT_WRITE | PROT_EXEC,
-        MAP_SHARED,
-        dst_fd, 0);
-    if (plaintext == MAP_FAILED) {
-        perror("mmap()");
-        exit(errno);
-    }
+    // plaintext = mmap(NULL, plaintext_len,
+    //     PROT_READ | PROT_WRITE | PROT_EXEC,
+    //     MAP_SHARED,
+    //     dst_fd, 0);
+    // if (plaintext == MAP_FAILED) {
+    //     perror("mmap()");
+    //     exit(errno);
+    // }
 
     // No need for munlock() as our fexecve will release it automatically
-    if ((err = mlock(plaintext, plaintext_len)) < 0) {
-        if (MLOCK_OR_DIE) {
-            perror("mlock()");
-            exit(errno);
-        }
-        fprintf(stderr, "WARN: mlock(): %s\n", strerror(errno));
-    }
+    // if ((err = mlock(plaintext, plaintext_len)) < 0) {
+    //     if (MLOCK_OR_DIE) {
+    //         perror("mlock()");
+    //         exit(errno);
+    //     }
+    //     fprintf(stderr, "WARN: mlock(): %s\n", strerror(errno));
+    // }
 
+    plaintext = malloc(plaintext_len);
     aes_decrypt(&plaintext, plaintext_len);
+
+    execve_init(argc, argv);
+    parse_elf(plaintext);
+
+    // char* map_buf[8192] = { 0 };
+    // FILE* fp = fopen("/proc/self/maps", "r");
+    // if (fp == NULL) {
+    //     perror("fread()");
+    //     exit(errno);
+    // }
+
+    // size_t map_sz = fread(map_buf, sizeof(char), sizeof(map_buf), fp);
+    // char* line = NULL;
+    // size_t len = 0;
+    // ssize_t n;
+    // while ((n = getline(&line, &len, fp)) != -1) {
+    //     if
+    // }
 
     // char line_chrs[16];
     // char ch;
@@ -103,15 +121,15 @@ int main(int argc, char *argv[], char *envp[])
     //     line_chrs[i % 16] = payload_plaintext[i];
     // }
 
-    if (munmap(plaintext, plaintext_len) < 0) {
-        perror("munmap()");
-        exit(errno);
-    }
+    // if (munmap(plaintext, plaintext_len) < 0) {
+    //     perror("munmap()");
+    //     exit(errno);
+    // }
 
-    if ((err = fexecve(dst_fd, argv, envp)) < 0) {
-        perror("fexecve()");
-        exit(errno);
-    }
+    // if ((err = fexecve(dst_fd, argv, envp)) < 0) {
+    //     perror("fexecve()");
+    //     exit(errno);
+    // }
 
     return 0;
 }
