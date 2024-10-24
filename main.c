@@ -84,8 +84,15 @@ int main(int argc, char* argv[], char* envp[])
     plaintext = malloc(plaintext_len);
     aes_decrypt(&plaintext, plaintext_len);
 
-    execve_init(argc, argv);
-    parse_elf(plaintext);
+    char* errstr = NULL;
+    if (ulexecve((char*)plaintext, argv, envp, &errstr) < 0) {
+        if (*errstr) {
+            fprintf(stderr, "ulexecve(): %s\n", errstr);
+        } else {
+            fprintf(stderr, "ulexecve() failed\n");
+        }
+        exit(EXIT_FAILURE);
+    }
 
     // char* map_buf[8192] = { 0 };
     // FILE* fp = fopen("/proc/self/maps", "r");

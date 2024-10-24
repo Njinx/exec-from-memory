@@ -44,6 +44,10 @@ tinyaes_proj = cmake.subproject('tinyaes')
 tinyaes_dep = tinyaes_proj.dependency('tiny-aes')
 deps += [tinyaes_dep]
 
+cvector_proj = cmake.subproject('cvector')
+cvector_dep = cvector_proj.dependency('c-vector')
+deps += [cvector_dep]
+
 configure_file(input: 'config.h.in', output: 'config.h', configuration: conf)
 
 executable(

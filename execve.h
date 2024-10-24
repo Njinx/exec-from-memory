@@ -11,8 +11,6 @@
 
 #endif
 
-void execve_init(int _argc, char** _argv);
-void parse_elf(const unsigned char* bytes);
-extern void jmp_to_payload(void* entry, void* sp);
+extern int ulexecve(char* bytes, char* const argv[], char* const envp[], char** errstr);
 
 #endif /* __EXECVE_H */
