@@ -7,6 +7,7 @@ import io
 import binascii
 import argparse
 import string
+import struct
 from collections.abc import Sequence
 
 from Crypto.Cipher import AES as aes
@@ -163,6 +164,14 @@ def emit_c_primitive(
     h_wtr.write(f'extern {c_decl};')
 
 
+def validate_prog(data: bytes) -> None:
+    if data[:4] != b'\x7f\x45\x4c\x46': # ELF magic
+        print('Not an ELF file', file=sys.stderr)
+        sys.exit(1)
+
+    # TODO: Check if executable is not positon independent
+
+
 def main() -> None:
     parse_args()
 
@@ -172,12 +181,13 @@ def main() -> None:
         argparser.print_usage(sys.stderr)
         sys.exit(1)
 
-    key = binascii.unhexlify(args.key)
-
     plaintext: bytes
     with open(args.input, 'rb') as src_fp:
         plaintext = src_fp.read()
 
+    validate_prog(plaintext)
+
+    key = binascii.unhexlify(args.key)
     ciphertext = encrypt(plaintext, key)
 
     c_path = os.path.join(args.outdir, f'{FILE_PREFIX}.c')
