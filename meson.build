@@ -52,7 +52,7 @@ configure_file(input: 'config.h.in', output: 'config.h', configuration: conf)
 
 executable(
     'executor',
-    ['main.c', 'execve.c', 'execve.h', 'exec_jmp.s', packed],
+    ['main.c', 'execve.c', 'execve.h', packed],
     dependencies: deps,
     c_args: cflags,
     link_args: ldflags,
