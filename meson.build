@@ -37,7 +37,7 @@ packed = custom_target(
 )
 
 deps = []
-cflags = ['-fno-stack-protector']
+cflags = ['-fno-stack-protector', '-fverbose-asm', '-masm=intel']
 ldflags = ['-static']
 
 tinyaes_proj = cmake.subproject('tinyaes')
