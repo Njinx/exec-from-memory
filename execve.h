@@ -11,6 +11,6 @@
 
 #endif
 
-extern int ulexecve(char const* bytes, char* const argv[], char* const envp[], char** errstr);
+extern int ulexecve(char const* bytes, size_t len, char* const argv[], char* const envp[], char **errstr);
 
 #endif /* __EXECVE_H */
