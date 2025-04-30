@@ -38,6 +38,8 @@ typedef struct {
     size_t pos;
 } stack_t;
 
+typedef char const** errstr_t;
+
 #define stack_curr(stack) ((stack).base - (stack).pos)
 
 struct auxinfo {
@@ -81,27 +83,28 @@ struct mapinfo {
 };
 
 
-void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_args* margs);
-void free_strtable(struct strtable* st);
-void make_strtable(stack_t* stack, struct strtable* st, struct main_args* margs);
-struct strtable* new_strtable();
-void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* st);
-bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent);
-void* copy_to_strtable(stack_t* stack, char* src, ssize_t len);
-int reprotect_maps();
-void append_to_maptable(struct mapinfo map);
-int map_segment(Elf64_Phdr* phdr, char const* bytes, void* base_addr, size_t base_addr_sz, char** errstr);
-int read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, char** errstr);
-int load_elf(char const* bytes, struct loadinfo* loadinfo, bool is_interp, char** errstr);
-long page_size();
-void jmp_to_payload(void* addr, void* sp);
+static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_args* margs);
+static void free_strtable(struct strtable* st);
+static void make_strtable(stack_t* stack, struct strtable* st, struct main_args* margs);
+static struct strtable* new_strtable();
+static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* st);
+static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent);
+static void* copy_to_strtable(stack_t* stack, char* src, ssize_t len);
+static int reprotect_maps();
+static void append_to_maptable(struct mapinfo map);
+static int map_segment(Elf64_Phdr* phdr, char const* bytes, void* base_addr, size_t base_addr_sz, errstr_t errstr);
+static int check_prog(char const *bytes, size_t len, errstr_t errstr);
+static long read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, errstr_t errstr);
+static int load_elf(char const* bytes, size_t len, struct loadinfo* loadinfo, bool is_interp, errstr_t errstr);
+static long page_size();
+static void jmp_to_payload(void* addr, void* sp);
 
 #define ALIGN_STACK(x, n) ((x) + (n) - (x) % (n))
 #define PAGE_FLOOR(x) ((size_t)(x) - (size_t)(x) % page_size())
 #define PAGE_CEIL(x) ((size_t)(x) + page_size() - (size_t)(x) % page_size() - 1)
 
-#define EHDR(base) ((Elf64_Ehdr*)(base))
-#define PHDR(base, i) ((Elf64_Phdr*)((void*)(base) + EHDR(base)->e_phoff + EHDR(base)->e_phentsize * (i)))
+#define EHDR(base) ((Elf64_Ehdr *)(base))
+#define PHDR(base, i) ((Elf64_Phdr *)((void *)(base) + EHDR(base)->e_phoff + sizeof(Elf64_Phdr) * (i)))
 
 /* The size in bytes that argc takes up on the stack. This is different than the size of
  * argc's type. On x86 ILP32 and x86_64 LP64 it's the word size and I bet this holds true on
@@ -113,7 +116,7 @@ void jmp_to_payload(void* addr, void* sp);
 static long _page_sz = -1;
 cvector_vector_type(struct mapinfo) maptable = NULL;
 
-long page_size()
+static long page_size()
 {
     if (_page_sz == -1) {
         _page_sz = sysconf(_SC_PAGESIZE);
@@ -126,18 +129,21 @@ long page_size()
 }
 
 // TODO: make data const
-int read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, char** errstr)
+static long read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, errstr_t errstr)
 {
+    char const* path;
+    struct stat info;
+    FILE* fp;
+
     assert(phdr->p_type == PT_INTERP);
 
-    char const* path = bytes + phdr->p_offset;
-    struct stat info;
+    path = bytes + phdr->p_offset;
     if (stat(path, &info) < 0) {
         *errstr = "Cannot stat interpreter\n";
         return -1;
     }
 
-    FILE* fp = fopen(path, "rb");
+    fp = fopen(path, "rb");
     if (!fp) {
         *errstr = "Cannot access interpreter\n";
         return -1;
@@ -149,7 +155,7 @@ int read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, char** e
 
     fclose(fp);
     *errstr = NULL;
-    return 0;
+    return info.st_size;
 }
 
 // struct dyninfo {
@@ -168,24 +174,44 @@ int read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, char** e
 //     }
 // }
 
-int load_elf(char const* bytes, struct loadinfo* loadinfo, bool is_interp, char** errstr)
+static int check_prog(char const *bytes, size_t len, errstr_t errstr)
 {
     Elf64_Ehdr* ehdr = EHDR(bytes);
 
+    if (len < SELFMAG) {
+        *errstr = "Bad executable size\n";
+        return -1;
+    }
     if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) {
         *errstr = "Not an ELF file\n";
         return -1;
     }
-
     if (ehdr->e_type != ET_EXEC && ehdr->e_type != ET_DYN) {
         *errstr = "Not an executable file\n";
         return -1;
     }
+    if (ehdr->e_phentsize != sizeof(Elf64_Phdr)) {
+        *errstr = "Bad Phdr size\n";
+        return -1;
+    }
 
-    // TODO: Do more checks
+    return 0;
+}
 
+static int load_elf(char const* bytes, size_t len, struct loadinfo* loadinfo, bool is_interp, errstr_t errstr)
+{
+    Elf64_Ehdr* ehdr = EHDR(bytes);
     Elf64_Phdr* phdr;
-    size_t base_addr_sz = 0;
+    size_t base_addr_sz;
+    int prot, flags;
+    void* base_addr;
+    bool is_dyn = false;
+
+    if (check_prog(bytes, len, errstr) < 0) {
+        return -1;
+    }
+
+    base_addr_sz = 0;
     for (int i = 0; i < ehdr->e_phnum; i++) {
         phdr = PHDR(bytes, i);
         if (phdr->p_type != PT_LOAD) {
@@ -203,19 +229,24 @@ int load_elf(char const* bytes, struct loadinfo* loadinfo, bool is_interp, char*
     }
     // base_addr_sz = PAGE_CEIL(base_addr_sz);
 
-    int prot = PROT_READ | PROT_WRITE;
-    int flags = MAP_ANONYMOUS | MAP_PRIVATE;
-    void* base_addr = mmap(NULL, base_addr_sz, prot, flags, -1, 0);
+    prot = PROT_READ | PROT_WRITE;
+    flags = MAP_ANONYMOUS | MAP_PRIVATE;
+
+    // Our base address MUST be page-aligned. Linux's mmap() always chooses a page-aligned address,
+    // but I'm unsure if this is portable.
+    base_addr = mmap(NULL, PAGE_CEIL(base_addr_sz), prot, flags, -1, 0);
     if (base_addr == MAP_FAILED) {
         perror("mmap()");
         exit(errno);
     }
+    memset(base_addr + base_addr_sz, 0, PAGE_CEIL(base_addr_sz) - base_addr_sz);
 
     // TODO: Parse DT_DYNAMIC if exists. We need DT_FINI and probably DT_INIT.
 
-    bool is_dyn = false;
     // struct dyninfo dinfo;
     // bool has_dyninfo = false;
+    char const *interp_data;
+    long interp_len;
     for (int i = 0; i < ehdr->e_phnum; i++) {
         phdr = PHDR(bytes, i);
 
@@ -226,11 +257,11 @@ int load_elf(char const* bytes, struct loadinfo* loadinfo, bool is_interp, char*
             }
 
             is_dyn = true;
-            char const *interp_data;
-            if (read_interp(bytes, phdr, &interp_data, errstr) < 0) {
+            interp_len = read_interp(bytes, phdr, &interp_data, errstr);
+            if (interp_len < 0) {
                 return -1;
             }
-            if (load_elf(interp_data, loadinfo, true, errstr) < 0) {
+            if (load_elf(interp_data, interp_len, loadinfo, true, errstr) < 0) {
                 return -1;
             }
             continue;
@@ -272,8 +303,10 @@ int load_elf(char const* bytes, struct loadinfo* loadinfo, bool is_interp, char*
     return 0;
 }
 
-int ulexecve(char const* bytes, char* const argv[], char* const envp[], char** errstr)
+int ulexecve(char const* bytes, size_t len, char* const argv[], char* const envp[], char **errstr)
 {
+    void *sp, *jmp_addr;
+
     struct loadinfo loadinfo = {
         .interp_base_addr = NULL,
         .prog_base_addr = NULL,
@@ -282,7 +315,12 @@ int ulexecve(char const* bytes, char* const argv[], char* const envp[], char** e
         .dt_fini_ptr = NULL,
         .is_stack_exec = false,
     };
-    if (load_elf(bytes, &loadinfo, false, errstr) < 0) {
+    struct main_args margs = {
+        .argv = argv,
+        .envp = envp,
+    };
+
+    if (load_elf(bytes, len, &loadinfo, false, (errstr_t)errstr) < 0) {
         return -1;
     }
     if (!loadinfo.prog_base_addr) {
@@ -290,18 +328,13 @@ int ulexecve(char const* bytes, char* const argv[], char* const envp[], char** e
         return -1;
     }
 
-    struct main_args margs = {
-        .argv = argv,
-        .envp = envp,
-    };
     // printf("interp_base_addr: %c\n", );
-    void* sp = dup_stack(EHDR(bytes), &loadinfo, &margs);
+    sp = dup_stack(EHDR(bytes), &loadinfo, &margs);
     if (!sp) {
         *errstr = "Failed to duplicate stack\n";
         return -1;
     }
 
-    void* jmp_addr;
     if (loadinfo.interp_base_addr) {
         jmp_addr = loadinfo.interp_base_addr + loadinfo.interp_entry;
     } else {
@@ -321,12 +354,12 @@ int ulexecve(char const* bytes, char* const argv[], char* const envp[], char** e
     return -1;
 }
 
-void append_to_maptable(struct mapinfo map)
+static void append_to_maptable(struct mapinfo map)
 {
     cvector_push_back(maptable, map);
 }
 
-int reprotect_maps()
+static int reprotect_maps()
 {
     struct mapinfo *map;
 
@@ -342,16 +375,19 @@ int reprotect_maps()
     return 0;
 }
 
-void set_map_name(void *ptr, size_t sz, char *name)
+static void set_map_name(void *ptr, size_t sz, char *name)
 {
-#ifdef PR_SET_VMA_ANON_NAME
+    #ifdef PR_SET_VMA_ANON_NAME
     prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, ptr, sz, name);
-#endif
+    #endif
 }
 
-int phdr_name(Elf64_Phdr *phdr, char **name)
+static int phdr_name(Elf64_Phdr *phdr, char **name)
 {
     char *pt;
+    char prot[4];
+    char const *fmt = "%s:0x%06lx:%s";
+    int len;
 
     #define pt_case(type) case type: pt = #type; break;
     switch (phdr->p_type) {
@@ -377,28 +413,29 @@ int phdr_name(Elf64_Phdr *phdr, char **name)
     }
     #undef pt_case
 
-    char prot[4];
     prot[0] = (phdr->p_flags & PF_R) ? 'R' : '-';
     prot[1] = (phdr->p_flags & PF_W) ? 'W' : '-';
     prot[2] = (phdr->p_flags & PF_X) ? 'X' : '-';
     prot[3] = '\0';
 
     // Note: This trick requires C99 and SUSv3 or greater
-    char const *fmt = "%s:0x%06lx:%s";
-    int len = snprintf(NULL, 0, fmt, prot, phdr->p_offset, pt) + 1;
+    len = snprintf(NULL, 0, fmt, prot, phdr->p_offset, pt) + 1;
     *name = malloc(len);
     return snprintf(*name, len, fmt, prot, phdr->p_offset, pt);
-
-#undef pt_case
 }
 
-int map_segment(Elf64_Phdr* phdr, char const* bytes, void* base_addr, size_t base_addr_sz, char** errstr)
+static int map_segment(Elf64_Phdr* phdr, char const* bytes, void* base_addr, size_t base_addr_sz, errstr_t errstr)
 {
     int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED;
-    void* addr = base_addr + phdr->p_vaddr;
-    void* aligned_addr = (void*)PAGE_FLOOR(addr);
-    size_t sz = phdr->p_filesz + (addr - aligned_addr);
-    int prot = 0;
+    int prot = PROT_NONE;
+    void *addr, *aligned_addr, *seg;
+    size_t sz;
+    char *name;
+
+    addr = base_addr + phdr->p_vaddr;
+    aligned_addr = (void*)PAGE_FLOOR(addr);
+    sz = phdr->p_filesz + (addr - aligned_addr);
+
     prot |= (phdr->p_flags & PF_R) ? PROT_READ : 0;
     prot |= (phdr->p_flags & PF_W) ? PROT_WRITE : 0;
     prot |= (phdr->p_flags & PF_X) ? PROT_EXEC : 0;
@@ -421,14 +458,13 @@ int map_segment(Elf64_Phdr* phdr, char const* bytes, void* base_addr, size_t bas
     assert(phdr->p_memsz > 0);
 
     // We need write permission to write to these pages, we'll remove it later with reprotect_maps()
-    void* seg = mmap(aligned_addr, PAGE_CEIL(sz), prot | PROT_WRITE, flags, -1, 0);
+    seg = mmap(aligned_addr, PAGE_CEIL(sz), prot | PROT_WRITE, flags, -1, 0);
     if (seg == MAP_FAILED) {
         perror("mmap()");
         exit(errno);
     }
 
 
-    char *name;
     phdr_name(phdr, &name);
     set_map_name(seg, PAGE_CEIL(sz), name);
     free(name);
@@ -459,7 +495,7 @@ int map_segment(Elf64_Phdr* phdr, char const* bytes, void* base_addr, size_t bas
     return 0;
 }
 
-void* copy_to_strtable(stack_t* stack, char* src, ssize_t len)
+static void* copy_to_strtable(stack_t* stack, char* src, ssize_t len)
 {
     if (len == -1) {
         len = strlen(src) + 1;
@@ -472,7 +508,7 @@ void* copy_to_strtable(stack_t* stack, char* src, ssize_t len)
 
 /* Returns whether or not the entry should be added to the auxiliary vector
  */
-bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
+static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
 {
     switch (ent->a_type) {
     case AT_EXECFD:
@@ -561,12 +597,13 @@ bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
     }
 }
 
-void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* st)
+static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* st)
 {
     cvector(auxv_t) auxv_tmp = NULL;
     FILE* fp;
     size_t n;
     auxv_t auxv_ent;
+    long const required_at[] = { AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM };
 
     fp = fopen("/proc/self/auxv", "rb");
     if (fp == NULL) {
@@ -587,7 +624,6 @@ void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* st)
         if (handle_auxv_ent(stack, auxinfo, &auxv_ent)) {
             cvector_push_back(auxv_tmp, auxv_ent);
         }
-
         if (auxv_ent.a_type == AT_NULL) {
             break;
         }
@@ -596,41 +632,47 @@ void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* st)
     assert(cvector_back(auxv_tmp)->a_type == AT_NULL);
 
     // Add required entries that may not be present in the current process
-    long const required[] = { AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM };
-    for (int i = 0; i < sizeof(required) / sizeof(*required); ++i) {
-        bool found = false;
-        for (auxv_t* ent = auxv_tmp; ent->a_type != AT_NULL; ++ent) {
-            if (ent->a_type == required[i]) {
+    int i;
+    bool found;
+    auxv_t *ent;
+    auxv_t tmp_ent;
+    for (i = 0; i < sizeof(required_at) / sizeof(*required_at); ++i) {
+        found = false;
+        for (ent = auxv_tmp; ent->a_type != AT_NULL; ++ent) {
+            if (ent->a_type == required_at[i]) {
                 found = true;
                 break;
             }
         }
 
         if (!found) {
-            auxv_t ent = { .a_type = required[i] };
-            if (!handle_auxv_ent(stack, auxinfo, &ent)) {
+            tmp_ent.a_type = required_at[i];
+            if (!handle_auxv_ent(stack, auxinfo, &tmp_ent)) {
                 fprintf(stderr, "handle_auxv_ent(): required argument was skipped.\n");
             }
             cvector_push_back(auxv_tmp, auxv_ent);
         }
     }
 
-    st->auxv_sz = sizeof(auxv_t) * cvector_size(auxv_tmp);
+    st->auxv_sz = cvector_size(auxv_tmp) * sizeof(auxv_t);
     st->auxv = malloc(st->auxv_sz);
     memcpy(st->auxv, auxv_tmp, st->auxv_sz);
     cvector_free(auxv_tmp);
     fclose(fp);
 }
 
-struct strtable* new_strtable()
+static struct strtable* new_strtable()
 {
     struct strtable* st = malloc(sizeof(struct strtable));
     st->auxv = NULL;
     return st;
 }
 
-void make_strtable(stack_t* stack, struct strtable* st, struct main_args* margs)
+static void make_strtable(stack_t* stack, struct strtable* st, struct main_args* margs)
 {
+    int i;
+    char** env;
+
     st->arg.c = 0;
     while (margs->argv[st->arg.c++])
         ;
@@ -640,11 +682,10 @@ void make_strtable(stack_t* stack, struct strtable* st, struct main_args* margs)
     st->arg.v = malloc(st->arg.sz);
     *(size_t*)stack_curr(*stack) = 0L;
     stack->pos += sizeof(size_t);
-    for (int i = st->arg.c - 1; i >= 0; --i) {
+    for (i = st->arg.c - 1; i >= 0; --i) {
         st->arg.v[i] = copy_to_strtable(stack, margs->argv[i], -1);
     }
 
-    char** env;
     for (st->env.c = 0, env = environ; *env != NULL; ++env, ++st->env.c)
         ;
 
@@ -653,12 +694,12 @@ void make_strtable(stack_t* stack, struct strtable* st, struct main_args* margs)
     *(size_t*)stack_curr(*stack) = 0L;
     stack->pos += sizeof(size_t);
     env = environ;
-    for (int i = 0; *env != NULL; ++env, ++i) {
+    for (i = 0; *env != NULL; ++env, ++i) {
         st->env.p[i] = copy_to_strtable(stack, *env, -1);
     }
 }
 
-void free_strtable(struct strtable* st)
+static void free_strtable(struct strtable* st)
 {
     free(st->arg.v);
     free(st->env.p);
@@ -667,16 +708,17 @@ void free_strtable(struct strtable* st)
     st->auxv = NULL;
 }
 
-void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_args* margs)
+static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_args* margs)
 {
     stack_t stack; // This points to the top of the stack
-    stack.pos = 0;
-    // stack.pos += (16 - 924 % 16) % 16;
-
     size_t stack_sz = 1024 * 1024 * 10; // 10MB
-    stack_sz += stack_sz % page_size();
     int prot = PROT_READ | PROT_WRITE;
     int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_GROWSDOWN;
+    struct strtable* st;
+
+    stack.pos = 0;
+    stack_sz += stack_sz % page_size();
+
     if (loadinfo->is_stack_exec) {
         prot |= PROT_EXEC;
     }
@@ -686,7 +728,7 @@ void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_args* m
     }
     stack.base += stack_sz;
 
-    struct strtable* st = new_strtable();
+    st = new_strtable();
     make_strtable(&stack, st, margs);
 
     // printf("prog_base_addr = %p, e_entry = %ld, e_phoff = %ld\n", loadinfo->prog_base_addr, ehdr->e_entry, ehdr->e_phoff);
@@ -752,7 +794,7 @@ void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_args* m
 }
 
 __attribute__((naked,noreturn))
-void jmp_to_payload(void* addr, void* sp)
+static void jmp_to_payload(void* addr, void* sp)
 {
     __asm__ volatile (
         "pop rbp\n" // Discard return pointer (it'll mess up stack alignment)

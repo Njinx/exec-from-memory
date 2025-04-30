@@ -85,7 +85,7 @@ int main(int argc, char* argv[], char* envp[])
     aes_decrypt(&plaintext, plaintext_len);
 
     char* errstr = NULL;
-    if (ulexecve((char*)plaintext, argv, envp, &errstr) < 0) {
+    if (ulexecve((char*)plaintext, plaintext_len, argv, envp, &errstr) < 0) {
         if (*errstr) {
             fprintf(stderr, "ulexecve(): %s\n", errstr);
         } else {
