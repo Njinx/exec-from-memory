@@ -23,7 +23,8 @@ struct main_args {
     char* const* envp;
 };
 
-// The elf.h definition of this struct is wrong for some reason, we so bring our own
+// TODO: Validate that this one is correct
+/* The elf.h definition of this struct is wrong for some reason, we so bring our own */
 typedef struct {
     int a_type;
     union {
@@ -51,7 +52,7 @@ struct auxinfo {
     // void* execfd;
 };
 
-// Contains pointers to all string table objects
+/* Contains pointers to all string table objects */
 struct strtable {
     struct {
         char** v;
@@ -82,7 +83,6 @@ struct mapinfo {
     int prot;
 };
 
-
 static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_args* margs);
 static void free_strtable(struct strtable* st);
 static void make_strtable(stack_t* stack, struct strtable* st, struct main_args* margs);
@@ -98,6 +98,8 @@ static long read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, 
 static int load_elf(char const* bytes, size_t len, struct loadinfo* loadinfo, bool is_interp, errstr_t errstr);
 static long page_size();
 static void jmp_to_payload(void* addr, void* sp);
+static void set_map_name(void *ptr, size_t sz, char *name);
+static int phdr_name(Elf64_Phdr *phdr, char **name);
 
 #define ALIGN_STACK(x, n) ((x) + (n) - (x) % (n))
 #define PAGE_FLOOR(x) ((size_t)(x) - (size_t)(x) % page_size())
@@ -128,7 +130,6 @@ static long page_size()
     return _page_sz;
 }
 
-// TODO: make data const
 static long read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, errstr_t errstr)
 {
     char const* path;
@@ -157,22 +158,6 @@ static long read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, 
     *errstr = NULL;
     return info.st_size;
 }
-
-// struct dyninfo {
-//     Elf64_Addr dt_fini;
-// };
-
-// void parse_dyn_table(void* base, size_t sz, struct dyninfo* dinfo)
-// {
-//     for (Elf64_Dyn* dyn = base; dyn < base + sz; dyn += sizeof(Elf64_Dyn)) {
-//         printf("d_tag: %lu\n", dyn->d_tag);
-//         switch (dyn->d_tag) {
-//         case DT_FINI:
-//             dinfo->dt_fini = dyn->d_un.d_ptr;
-//             break;
-//         }
-//     }
-// }
 
 static int check_prog(char const *bytes, size_t len, errstr_t errstr)
 {
@@ -222,29 +207,24 @@ static int load_elf(char const* bytes, size_t len, struct loadinfo* loadinfo, bo
         }
     }
 
-    /* No loadable segments were present (allowed by the spec) or something is seriously wrong.
-     */
+    /* No loadable segments were present (allowed by the spec) or something is seriously wrong. */
     if (base_addr_sz == 0) {
         exit(EXIT_SUCCESS);
     }
-    // base_addr_sz = PAGE_CEIL(base_addr_sz);
 
     prot = PROT_READ | PROT_WRITE;
     flags = MAP_ANONYMOUS | MAP_PRIVATE;
 
-    // Our base address MUST be page-aligned. Linux's mmap() always chooses a page-aligned address,
-    // but I'm unsure if this is portable.
-    base_addr = mmap(NULL, PAGE_CEIL(base_addr_sz), prot, flags, -1, 0);
+    /* Our base address MUST be page-aligned. Linux's mmap() always chooses a page-aligned address,
+     * but I'm unsure if this is portable.
+     */
+    base_addr = mmap(NULL, base_addr_sz, prot, flags, -1, 0);
     if (base_addr == MAP_FAILED) {
         perror("mmap()");
         exit(errno);
     }
-    memset(base_addr + base_addr_sz, 0, PAGE_CEIL(base_addr_sz) - base_addr_sz);
+    memset(base_addr + base_addr_sz, 0, base_addr_sz - base_addr_sz);
 
-    // TODO: Parse DT_DYNAMIC if exists. We need DT_FINI and probably DT_INIT.
-
-    // struct dyninfo dinfo;
-    // bool has_dyninfo = false;
     char const *interp_data;
     long interp_len;
     for (int i = 0; i < ehdr->e_phnum; i++) {
@@ -270,11 +250,6 @@ static int load_elf(char const* bytes, size_t len, struct loadinfo* loadinfo, bo
         if (phdr->p_type == PT_GNU_STACK && phdr->p_flags & PF_X) {
             loadinfo->is_stack_exec = true;
         }
-
-        // if (phdr->p_type == PT_DYNAMIC) {
-        //     parse_dyn_table((void*)bytes + phdr->p_offset, phdr->p_filesz, &dinfo);
-        //     has_dyninfo = true;
-        // }
 
         if (phdr->p_type != PT_LOAD) {
             continue;
@@ -328,7 +303,6 @@ int ulexecve(char const* bytes, size_t len, char* const argv[], char* const envp
         return -1;
     }
 
-    // printf("interp_base_addr: %c\n", );
     sp = dup_stack(EHDR(bytes), &loadinfo, &margs);
     if (!sp) {
         *errstr = "Failed to duplicate stack\n";
@@ -389,7 +363,7 @@ static int phdr_name(Elf64_Phdr *phdr, char **name)
     char const *fmt = "%s:0x%06lx:%s";
     int len;
 
-    #define pt_case(type) case type: pt = #type; break;
+#define pt_case(type) case type: pt = #type; break;
     switch (phdr->p_type) {
     pt_case(PT_NULL)
     pt_case(PT_LOAD)
@@ -411,20 +385,19 @@ static int phdr_name(Elf64_Phdr *phdr, char **name)
         pt = "PT_UNKNOWN";
         break;
     }
-    #undef pt_case
+#undef pt_case
 
     prot[0] = (phdr->p_flags & PF_R) ? 'R' : '-';
     prot[1] = (phdr->p_flags & PF_W) ? 'W' : '-';
     prot[2] = (phdr->p_flags & PF_X) ? 'X' : '-';
     prot[3] = '\0';
 
-    // Note: This trick requires C99 and SUSv3 or greater
     len = snprintf(NULL, 0, fmt, prot, phdr->p_offset, pt) + 1;
     *name = malloc(len);
     return snprintf(*name, len, fmt, prot, phdr->p_offset, pt);
 }
 
-static int map_segment(Elf64_Phdr* phdr, char const* bytes, void* base_addr, size_t base_addr_sz, errstr_t errstr)
+static int map_segment(Elf64_Phdr *phdr, char const *bytes, void *base_addr, size_t base_addr_sz, errstr_t errstr)
 {
     int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED;
     int prot = PROT_NONE;
@@ -433,63 +406,39 @@ static int map_segment(Elf64_Phdr* phdr, char const* bytes, void* base_addr, siz
     char *name;
 
     addr = base_addr + phdr->p_vaddr;
-    aligned_addr = (void*)PAGE_FLOOR(addr);
-    sz = phdr->p_filesz + (addr - aligned_addr);
+    aligned_addr = (void *)PAGE_FLOOR(addr);
+    sz = phdr->p_memsz + (addr - aligned_addr);
 
     prot |= (phdr->p_flags & PF_R) ? PROT_READ : 0;
     prot |= (phdr->p_flags & PF_W) ? PROT_WRITE : 0;
     prot |= (phdr->p_flags & PF_X) ? PROT_EXEC : 0;
-    // long off = phdr->p_offset - (addr - aligned_addr);
-
-    /*
-     * Saw this comment:
-     * The ELF format is different from PE, the segments are not extended to fill the slack space
-     * between. So all data and code is joined together with just the section headers between. You
-     * can't change that, it is the ELF format. When the loader allocates the pages in memory you
-     * will find "gaps" before and after each section where the code and data has been skipped to
-     * match the file arrangement.
-     *
-     * Should we be using p_filesz instead of p_memsz for size calculation? Maybe that's why we're
-     * segfaulting.
-     */
 
     assert(phdr->p_filesz <= phdr->p_memsz);
-    assert(aligned_addr >= base_addr && aligned_addr + phdr->p_memsz <= base_addr + base_addr_sz);
+    assert(aligned_addr >= base_addr && aligned_addr + sz <= base_addr + base_addr_sz);
     assert(phdr->p_memsz > 0);
 
-    // We need write permission to write to these pages, we'll remove it later with reprotect_maps()
-    seg = mmap(aligned_addr, PAGE_CEIL(sz), prot | PROT_WRITE, flags, -1, 0);
+    /* We need write permission to write to these pages, we'll remove it later with reprotect_maps() */
+    seg = mmap(aligned_addr, sz, prot | PROT_WRITE, flags, -1, 0);
     if (seg == MAP_FAILED) {
         perror("mmap()");
         exit(errno);
     }
 
-
     phdr_name(phdr, &name);
-    set_map_name(seg, PAGE_CEIL(sz), name);
+    set_map_name(seg, sz, name);
     free(name);
 
-    // if (phdr->p_filesz - off - 1 > phdr->p_memsz) {
-    //     printf("phdr %d: copy out of bounds\n", i);
-    //     exit(1);
-    // }
-
     // // Copy segment into memory and zero the remainder of the last page
-    memcpy(seg, bytes + phdr->p_offset, sz);
+    // TODO: Make sure the `p_filesz` and `sz` discrepancy won't cause any issues
+    memcpy(seg + (addr - aligned_addr), bytes + phdr->p_offset, phdr->p_filesz);
     // memset(seg + sz, 0, PAGE_CEIL(sz) - sz);
 
-    // memset(seg, 0, PAGE_CEIL(sz));
-    // memcpy(seg + (addr - aligned_addr), bytes + phdr->p_offset, sz);
     struct mapinfo minfo = {
         .ptr = seg,
         .len = PAGE_CEIL(sz),
         .prot = prot,
     };
     append_to_maptable(minfo);
-    // if (mprotect(seg, PAGE_CEIL(sz), prot) < 0) {
-    //     perror("mprotect()");
-    //     exit(errno);
-    // }
 
     *errstr = NULL;
     return 0;
@@ -506,8 +455,7 @@ static void* copy_to_strtable(stack_t* stack, char* src, ssize_t len)
     return stack_curr(*stack);
 }
 
-/* Returns whether or not the entry should be added to the auxiliary vector
- */
+/* Returns whether or not the entry should be added to the auxiliary vector */
 static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
 {
     switch (ent->a_type) {
@@ -516,7 +464,6 @@ static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
 
     case AT_PHDR: // TODO interp
         ent->a_un.a_ptr = info->phdr;
-        printf("!!phdr: %p\n", info->phdr);
         return true;
     case AT_PHENT:
         ent->a_un.a_val = info->phent;
@@ -526,11 +473,9 @@ static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
         return true;
     case AT_ENTRY:
         ent->a_un.a_ptr = info->entry;
-        printf("!!entr: %p\n", info->entry);
         return true;
     case AT_BASE:
         ent->a_un.a_ptr = info->base;
-        printf("!!base: %p\n", info->base);
         return true;
     // case AT_EXECFD:
     //     ent->a_un.a_ptr = info->execfd;
@@ -631,7 +576,7 @@ static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* s
 
     assert(cvector_back(auxv_tmp)->a_type == AT_NULL);
 
-    // Add required entries that may not be present in the current process
+    /* Add required entries that may not be present in the current process */
     int i;
     bool found;
     auxv_t *ent;
@@ -726,47 +671,31 @@ static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_
         perror("mmap()");
         exit(errno);
     }
+    set_map_name(stack.base, stack_sz + 1, "stack");
     stack.base += stack_sz;
 
     st = new_strtable();
     make_strtable(&stack, st, margs);
 
-    // printf("prog_base_addr = %p, e_entry = %ld, e_phoff = %ld\n", loadinfo->prog_base_addr, ehdr->e_entry, ehdr->e_phoff);
     struct auxinfo auxinfo = {
         .phdr = loadinfo->prog_base_addr + ehdr->e_phoff,
         .phent = ehdr->e_phentsize,
         .phnum = ehdr->e_phnum,
     };
 
-    if (loadinfo->interp_base_addr) {
-        auxinfo.entry = loadinfo->prog_base_addr + loadinfo->prog_entry;
-        auxinfo.base = loadinfo->interp_base_addr;
-    } else {
-        auxinfo.entry = NULL;
-        auxinfo.base = NULL;
-    }
+    auxinfo.base = loadinfo->interp_base_addr ? loadinfo->interp_base_addr : NULL;
+    auxinfo.entry = loadinfo->prog_base_addr + loadinfo->prog_entry;
 
     dup_auxv(&stack, &auxinfo, st);
 
-    /* We want stack to be aligned to 16 bytes. Align enough here so that argc
+    /* SysV wants the stack to be aligned to 16 bytes. Align enough here so that argc
      * takes care of the rest.
      */
     assert(STACK_ALIGN >= ARGC_STORE_SZ);
     stack.pos = ALIGN_STACK(stack.pos, STACK_ALIGN);
-    if ((st->arg.sz + st->env.sz) % 2 == 0) {
+    if ((st->arg.sz + st->env.sz) % STACK_ALIGN == 0) {
         stack.pos += ARGC_STORE_SZ;
     }
-
-    // This is wrong as it only includes the strtable size + sizeof(int)
-    // size_t total_sz = st->auxv_sz + st->env.sz + st->arg.sz + sizeof(st->arg.c);
-    // fprintf(stderr, "total_sz: %ld\n", total_sz);
-
-    // /* Align the stack to a 24 byte boundary as argc will correct this to the required 16 bytes.
-    //  * It's important that this happens at the boundary between the string table and rest of our
-    //  * initial stack, as the layout after the string table cannot be changed.
-    //  */
-    // stack.pos += (16 - stack.pos % 16) % 16 - sizeof(uint32_t);
-    // stack.pos += (16 - total_sz % 16) % 16;
 
     assert(st->auxv_sz % STACK_ALIGN == 0);
     assert(st->arg.sz % sizeof(size_t) == 0);
@@ -794,17 +723,39 @@ static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_
 }
 
 __attribute__((naked,noreturn))
-static void jmp_to_payload(void* addr, void* sp)
+static void jmp_to_payload(void *addr, void *sp)
 {
+    /* We're clearing most registers, including rbp. So stack-frame-relative addressing won't work
+     * and we must jmp via an absolute or rip-relative address. Storing the address in global
+     * memory will do the trick.
+     */
+    static volatile void *nooff_addr;
+    nooff_addr = addr;
+
     __asm__ volatile (
-        "pop rbp\n" // Discard return pointer (it'll mess up stack alignment)
+        "pop rbp\n" /* Discard return pointer (it'll mess up stack alignment) */
         "fnclex\n"
         "mov rsp, %1\n"
+        /* Most of these aren't required to be cleared per the spec. This is simply a precaution. */
         "xor rbp, rbp\n"
         "xor rdx, rdx\n"
+        "xor rax, rax\n"
+        "xor rbx, rbx\n"
+        "xor rbp, rbp\n"
+        "xor rcx, rcx\n"
+        "xor rdi, rdi\n"
+        "xor rsi, rsi\n"
+        "xor r8, r8\n"
+        "xor r9, r9\n"
+        "xor r10, r10\n"
+        "xor r11, r11\n"
+        "xor r12, r12\n"
+        "xor r13, r13\n"
+        "xor r14, r14\n"
+        "xor r15, r15\n"
         "jmp %0\n"
         :
-        : "r"(addr), "r"(sp)
+        : "m"(nooff_addr), "r"(sp)
     );
     __builtin_unreachable();
 }
