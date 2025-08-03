@@ -34,8 +34,19 @@ packed = custom_target(
 )
 
 deps = []
-cflags = ['-fno-stack-protector', '-fverbose-asm', '-masm=intel']
-ldflags = ['-static']
+cflags = [
+    '-fno-stack-protector', '-fverbose-asm', '-masm=intel',
+    '-fsanitize=undefined',
+
+    '-Wall', '-Wextra', '-Wundef',
+    '-Wshadow', '-Wpointer-arith', '-Wcast-align', '-Wstrict-overflow=5',
+    '-Wwrite-strings', '-Waggregate-return', '-Wcast-qual',
+    '-Wswitch-enum', '-Wunreachable-code',
+
+    '-Wno-unused-parameter'
+
+]
+ldflags = ['-static', '-fsanitize=undefined']
 
 tinyaes_proj = cmake.subproject('tinyaes')
 tinyaes_dep = tinyaes_proj.dependency('tiny-aes')
