@@ -17,6 +17,7 @@
 #include <cvector.h>
 
 #include "execve.h"
+#include "config.h"
 
 struct main_args {
     char* const* argv;
@@ -138,10 +139,13 @@ static long read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, 
 
     assert(phdr->p_type == PT_INTERP);
 
-    path = bytes + phdr->p_offset;
-    if (stat(path, &info) < 0) {
-        *errstr = "Cannot stat interpreter\n";
-        return -1;
+    path = INTERP_OVERRIDE;
+    if (*path == '\0') {
+        path = (char const *)bytes + phdr->p_offset;
+        if (stat(path, &info) < 0) {
+            *errstr = "Cannot stat interpreter\n";
+            return -1;
+        }
     }
 
     fp = fopen(path, "rb");
@@ -639,7 +643,8 @@ static void make_strtable(stack_t* stack, struct strtable* st, struct main_args*
     *(size_t*)stack_curr(*stack) = 0L;
     stack->pos += sizeof(size_t);
     env = environ;
-    for (i = 0; *env != NULL; ++env, ++i) {
+    st->env.p[0] = NULL;
+    for (i = 1; *env != NULL; ++env, ++i) {
         st->env.p[i] = copy_to_strtable(stack, *env, -1);
     }
 }

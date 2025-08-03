@@ -15,11 +15,8 @@ if not fs.is_absolute(payload_path)
     payload_path = join_paths(meson.project_source_root(), payload_path)
 endif
 
-if get_option('mlock_or_die')
-    conf.set('mlock_or_die', 1)
-else
-    conf.set('mlock_or_die', 0)
-endif
+conf.set('mlock_or_die', get_option('mlock_or_die'))
+conf.set('interp', get_option('interp'))
 
 pack_args = [
     './pack.py',

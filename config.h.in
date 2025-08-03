@@ -2,5 +2,6 @@
 #define __CONFIG_H
 
 #define MLOCK_OR_DIE @mlock_or_die@
+#define INTERP_OVERRIDE "@interp@"
 
 #endif /* __CONFIG_H */
