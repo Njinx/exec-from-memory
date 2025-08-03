@@ -13,10 +13,10 @@
 #include "execve.h"
 #include "payload.h"
 
-void aes_decrypt(unsigned char** plaintext, size_t plaintext_len);
+void aes_decrypt(unsigned char** plaintext);
 int main(int argc, char* argv[], char* envp[]);
 
-void aes_decrypt(unsigned char** plaintext, size_t plaintext_len)
+void aes_decrypt(unsigned char** plaintext)
 {
     int i = 0;
     struct AES_ctx ctx;
@@ -35,7 +35,7 @@ void aes_decrypt(unsigned char** plaintext, size_t plaintext_len)
 
     AES_init_ctx(&ctx, aes_key);
     memcpy(*plaintext, payload_data, plaintext_len);
-    while (i < plaintext_len - remainder) {
+    while ((unsigned int)i < plaintext_len - remainder) {
         AES_ECB_decrypt(&ctx, *plaintext + i);
         i += AES_BLOCKLEN;
     }
@@ -82,10 +82,10 @@ int main(int argc, char* argv[], char* envp[])
     // }
 
     plaintext = malloc(plaintext_len);
-    aes_decrypt(&plaintext, plaintext_len);
+    aes_decrypt(&plaintext);
 
-    char* errstr = NULL;
-    if (ulexecve((char*)plaintext, plaintext_len, argv, envp, &errstr) < 0) {
+    char const *errstr = NULL;
+    if (ulexecve(plaintext, plaintext_len, argv, envp, &errstr) < 0) {
         if (*errstr) {
             fprintf(stderr, "ulexecve(): %s\n", errstr);
         } else {

@@ -20,61 +20,57 @@
 #include "config.h"
 
 struct main_args {
-    char* const* argv;
-    char* const* envp;
+    char *const *argv;
+    char *const *envp;
 };
 
-// TODO: Validate that this one is correct
-/* The elf.h definition of this struct is wrong for some reason, we so bring our own */
 typedef struct {
-    int a_type;
+    size_t a_type;
     union {
-        long a_val;
-        void* a_ptr;
+        size_t a_val;
+        void *a_ptr;
         void (*a_fcn)();
     } a_un;
 } auxv_t;
 
 typedef struct {
-    uint8_t* base;
+    uint8_t *base;
     size_t pos;
 } stack_t;
 
-typedef char const** errstr_t;
+typedef char const **errstr_t;
 
 #define stack_curr(stack) ((stack).base - (stack).pos)
 
 struct auxinfo {
-    void* phdr;
+    uint8_t *phdr;
     long phent;
     long phnum;
-    void* entry;
-    void* base;
-    // void* execfd;
+    uint8_t *entry;
+    uint8_t *base;
 };
 
 /* Contains pointers to all string table objects */
 struct strtable {
     struct {
-        char** v;
+        char **v;
         int c;
         size_t sz;
     } arg;
     struct {
-        char** p;
+        char **p;
         int c;
         size_t sz;
     } env;
-    auxv_t* auxv;
+    auxv_t *auxv;
     size_t auxv_sz;
 };
 
 struct loadinfo {
-    void* interp_base_addr;
-    void* prog_base_addr;
+    uint8_t *interp_base_addr;
+    uint8_t *prog_base_addr;
     size_t interp_entry;
     size_t prog_entry;
-    void* dt_fini_ptr;
     bool is_stack_exec;
 };
 
@@ -84,30 +80,31 @@ struct mapinfo {
     int prot;
 };
 
-static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_args* margs);
+static void *dup_stack(Elf64_Ehdr const *ehdr, struct loadinfo *loadinfo, struct main_args *margs);
 static void free_strtable(struct strtable* st);
-static void make_strtable(stack_t* stack, struct strtable* st, struct main_args* margs);
-static struct strtable* new_strtable();
-static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* st);
-static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent);
-static void* copy_to_strtable(stack_t* stack, char* src, ssize_t len);
+static void make_strtable(stack_t *stack, struct strtable *st, struct main_args *margs);
+static void dup_auxv(stack_t *stack, struct auxinfo *auxinfo, struct strtable *st);
+static bool handle_auxv_ent(stack_t *stack, struct auxinfo* info, auxv_t* ent);
+static void *copy_to_strtable(stack_t *stack, char *src, ssize_t len);
 static int reprotect_maps();
 static void append_to_maptable(struct mapinfo map);
-static int map_segment(Elf64_Phdr* phdr, char const* bytes, void* base_addr, size_t base_addr_sz, errstr_t errstr);
-static int check_prog(char const *bytes, size_t len, errstr_t errstr);
-static long read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, errstr_t errstr);
-static int load_elf(char const* bytes, size_t len, struct loadinfo* loadinfo, bool is_interp, errstr_t errstr);
+static int map_segment(Elf64_Phdr const *phdr, uint8_t const *bytes, uint8_t const* base_addr, size_t base_addr_sz, errstr_t errstr);
+static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr);
+static long read_interp(uint8_t const *bytes, Elf64_Phdr const *phdr, uint8_t **data, errstr_t errstr);
+static int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo, bool is_interp, errstr_t errstr);
 static long page_size();
-static void jmp_to_payload(void* addr, void* sp);
-static void set_map_name(void *ptr, size_t sz, char *name);
-static int phdr_name(Elf64_Phdr *phdr, char **name);
+static void jmp_to_payload(uint8_t const *addr, uint8_t *sp);
+static void set_map_name(uint8_t const *ptr, size_t sz, char const *name);
+static int phdr_name(Elf64_Phdr const *phdr, char **name);
 
+/* 'n' must be a power of 2 */
 #define ALIGN_STACK(x, n) ((x) + (n) - (x) % (n))
+
 #define PAGE_FLOOR(x) ((size_t)(x) - (size_t)(x) % page_size())
 #define PAGE_CEIL(x) ((size_t)(x) + page_size() - (size_t)(x) % page_size() - 1)
 
-#define EHDR(base) ((Elf64_Ehdr *)(base))
-#define PHDR(base, i) ((Elf64_Phdr *)((void *)(base) + EHDR(base)->e_phoff + sizeof(Elf64_Phdr) * (i)))
+#define EHDR(base) ((Elf64_Ehdr const *)(base))
+#define PHDR(base, i) ((Elf64_Phdr const *)((uint8_t const *)(base) + EHDR(base)->e_phoff + sizeof(Elf64_Phdr) * (i)))
 
 /* The size in bytes that argc takes up on the stack. This is different than the size of
  * argc's type. On x86 ILP32 and x86_64 LP64 it's the word size and I bet this holds true on
@@ -131,11 +128,11 @@ static long page_size()
     return _page_sz;
 }
 
-static long read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, errstr_t errstr)
+static long read_interp(uint8_t const *bytes, Elf64_Phdr const *phdr, uint8_t **data, errstr_t errstr)
 {
-    char const* path;
+    char const *path;
     struct stat info;
-    FILE* fp;
+    FILE *fp;
 
     assert(phdr->p_type == PT_INTERP);
 
@@ -163,9 +160,9 @@ static long read_interp(char const* bytes, Elf64_Phdr* phdr, char const** data, 
     return info.st_size;
 }
 
-static int check_prog(char const *bytes, size_t len, errstr_t errstr)
+static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr)
 {
-    Elf64_Ehdr* ehdr = EHDR(bytes);
+    Elf64_Ehdr const*ehdr = EHDR(bytes);
 
     if (len < SELFMAG) {
         *errstr = "Bad executable size\n";
@@ -187,13 +184,13 @@ static int check_prog(char const *bytes, size_t len, errstr_t errstr)
     return 0;
 }
 
-static int load_elf(char const* bytes, size_t len, struct loadinfo* loadinfo, bool is_interp, errstr_t errstr)
+static int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo, bool is_interp, errstr_t errstr)
 {
-    Elf64_Ehdr* ehdr = EHDR(bytes);
-    Elf64_Phdr* phdr;
+    Elf64_Ehdr const *ehdr = EHDR(bytes);
+    Elf64_Phdr const *phdr;
     size_t base_addr_sz;
     int prot, flags;
-    void* base_addr;
+    uint8_t *base_addr;
     bool is_dyn = false;
 
     if (check_prog(bytes, len, errstr) < 0) {
@@ -229,7 +226,7 @@ static int load_elf(char const* bytes, size_t len, struct loadinfo* loadinfo, bo
     }
     memset(base_addr + base_addr_sz, 0, base_addr_sz - base_addr_sz);
 
-    char const *interp_data;
+    uint8_t *interp_data;
     long interp_len;
     for (int i = 0; i < ehdr->e_phnum; i++) {
         phdr = PHDR(bytes, i);
@@ -266,32 +263,27 @@ static int load_elf(char const* bytes, size_t len, struct loadinfo* loadinfo, bo
     }
 
     if (is_dyn || !is_interp) {
-    // if (!is_interp) {
         loadinfo->prog_base_addr = base_addr;
         loadinfo->prog_entry = ehdr->e_entry;
     } else {
         loadinfo->interp_base_addr = base_addr;
         loadinfo->interp_entry = ehdr->e_entry;
-        // assert(has_dyninfo);
-        // loadinfo->dt_fini_ptr = (void*)dinfo.dt_fini;
     }
-    // fprintf(stderr, "prog_base_addr: %p\n", loadinfo->prog_base_addr);
-    // fprintf(stderr, "interp_base_addr: %p\n", loadinfo->interp_base_addr);
 
     *errstr = NULL;
     return 0;
 }
 
-int ulexecve(char const* bytes, size_t len, char* const argv[], char* const envp[], char **errstr)
+int ulexecve(unsigned char const* bytes, size_t len, char* const argv[], char* const envp[], char const **errstr)
 {
-    void *sp, *jmp_addr;
+    uint8_t const *jmp_addr;
+    uint8_t *sp;
 
     struct loadinfo loadinfo = {
         .interp_base_addr = NULL,
         .prog_base_addr = NULL,
         .interp_entry = 0,
         .prog_entry = 0,
-        .dt_fini_ptr = NULL,
         .is_stack_exec = false,
     };
     struct main_args margs = {
@@ -353,16 +345,16 @@ static int reprotect_maps()
     return 0;
 }
 
-static void set_map_name(void *ptr, size_t sz, char *name)
+static void set_map_name(uint8_t const *ptr, size_t sz, char const *name)
 {
     #ifdef PR_SET_VMA_ANON_NAME
     prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, ptr, sz, name);
     #endif
 }
 
-static int phdr_name(Elf64_Phdr *phdr, char **name)
+static int phdr_name(Elf64_Phdr const *phdr, char **name)
 {
-    char *pt;
+    char const *pt;
     char prot[4];
     char const *fmt = "%s:0x%06lx:%s";
     int len;
@@ -401,11 +393,12 @@ static int phdr_name(Elf64_Phdr *phdr, char **name)
     return snprintf(*name, len, fmt, prot, phdr->p_offset, pt);
 }
 
-static int map_segment(Elf64_Phdr *phdr, char const *bytes, void *base_addr, size_t base_addr_sz, errstr_t errstr)
+static int map_segment(Elf64_Phdr const *phdr, uint8_t const *bytes, uint8_t const *base_addr, size_t base_addr_sz, errstr_t errstr)
 {
     int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED;
     int prot = PROT_NONE;
-    void *addr, *aligned_addr, *seg;
+    uint8_t const *addr;
+    uint8_t *aligned_addr, *seg;
     size_t sz;
     char *name;
 
@@ -481,9 +474,6 @@ static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
     case AT_BASE:
         ent->a_un.a_ptr = info->base;
         return true;
-    // case AT_EXECFD:
-    //     ent->a_un.a_ptr = info->execfd;
-    //     return true;
     case AT_PAGESZ:
         ent->a_un.a_val = page_size();
         return true;
@@ -541,7 +531,7 @@ static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
     case AT_NULL:
         return true;
     default:
-        fprintf(stderr, "Unknown auxv a_type %x\n", ent->a_type);
+        fprintf(stderr, "Unknown auxv a_type %zu\n", ent->a_type);
         return true;
     }
 }
@@ -552,7 +542,7 @@ static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* s
     FILE* fp;
     size_t n;
     auxv_t auxv_ent;
-    long const required_at[] = { AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM };
+    size_t const required_at[] = { AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM };
 
     fp = fopen("/proc/self/auxv", "rb");
     if (fp == NULL) {
@@ -581,7 +571,7 @@ static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* s
     assert(cvector_back(auxv_tmp)->a_type == AT_NULL);
 
     /* Add required entries that may not be present in the current process */
-    int i;
+    size_t i;
     bool found;
     auxv_t *ent;
     auxv_t tmp_ent;
@@ -610,22 +600,13 @@ static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* s
     fclose(fp);
 }
 
-static struct strtable* new_strtable()
-{
-    struct strtable* st = malloc(sizeof(struct strtable));
-    st->auxv = NULL;
-    return st;
-}
-
-static void make_strtable(stack_t* stack, struct strtable* st, struct main_args* margs)
+static void make_strtable(stack_t *stack, struct strtable *st, struct main_args *margs)
 {
     int i;
-    char** env;
+    char **env;
 
-    st->arg.c = 0;
-    while (margs->argv[st->arg.c++])
+    for (st->arg.c = 0; margs->argv[st->arg.c]; ++st->arg.c)
         ;
-    --st->arg.c;
 
     st->arg.sz = sizeof(*st->arg.v) * (st->arg.c + 1);
     st->arg.v = malloc(st->arg.sz);
@@ -649,16 +630,22 @@ static void make_strtable(stack_t* stack, struct strtable* st, struct main_args*
     }
 }
 
-static void free_strtable(struct strtable* st)
+static void free_strtable(struct strtable *st)
 {
-    free(st->arg.v);
-    free(st->env.p);
-    free(st->auxv);
+    if (st->arg.v) {
+        free(st->arg.v);
+    }
+    if (st->env.p) {
+        free(st->env.p);
+    }
+    if (st->auxv) {
+        free(st->auxv);
+    }
     st->arg.v = st->env.p = NULL;
     st->auxv = NULL;
 }
 
-static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_args* margs)
+static void* dup_stack(Elf64_Ehdr const* ehdr, struct loadinfo* loadinfo, struct main_args* margs)
 {
     stack_t stack; // This points to the top of the stack
     size_t stack_sz = 1024 * 1024 * 10; // 10MB
@@ -679,7 +666,7 @@ static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_
     set_map_name(stack.base, stack_sz + 1, "stack");
     stack.base += stack_sz;
 
-    st = new_strtable();
+    st = calloc(1, sizeof(struct strtable));
     make_strtable(&stack, st, margs);
 
     struct auxinfo auxinfo = {
@@ -706,9 +693,6 @@ static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_
     assert(st->arg.sz % sizeof(size_t) == 0);
     assert(st->env.sz % sizeof(size_t) == 0);
 
-    // NOTE: Problem seems to be with `EVar2 = (main_map->l_info[5]->d_un).d_val` in
-    // audit_list_add_dynamic_tag
-
     stack.pos += st->auxv_sz;
     memcpy(stack_curr(stack), st->auxv, st->auxv_sz);
 
@@ -728,13 +712,13 @@ static void* dup_stack(Elf64_Ehdr* ehdr, struct loadinfo* loadinfo, struct main_
 }
 
 __attribute__((naked,noreturn))
-static void jmp_to_payload(void *addr, void *sp)
+static void jmp_to_payload(uint8_t const *addr, uint8_t *sp)
 {
     /* We're clearing most registers, including rbp. So stack-frame-relative addressing won't work
      * and we must jmp via an absolute or rip-relative address. Storing the address in global
      * memory will do the trick.
      */
-    static volatile void *nooff_addr;
+    static volatile uint8_t const *nooff_addr;
     nooff_addr = addr;
 
     __asm__ volatile (
