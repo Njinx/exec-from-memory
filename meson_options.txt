@@ -16,3 +16,9 @@ option(
     value: true,
     description: 'Exit if swapping behavior cannot be disabled',
 )
+option(
+    'interp',
+    type: 'string',
+    value: '',
+    description: 'Override the interpreter',
+)
