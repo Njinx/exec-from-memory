@@ -243,8 +243,10 @@ static int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo,
                 return -1;
             }
             if (load_elf(interp_data, interp_len, loadinfo, true, errstr) < 0) {
+                munmap(interp_data, interp_len);
                 return -1;
             }
+            munmap(interp_data, interp_len);
             continue;
         }
 
