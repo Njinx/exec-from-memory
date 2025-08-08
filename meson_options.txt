@@ -1,4 +1,10 @@
 option(
+    'debugg',
+    type: 'boolean',
+    value: false,
+    description: 'Enable/disable various debugging facilities',
+)
+option(
     'payload',
     type: 'string',
     value: '',
