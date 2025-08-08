@@ -94,8 +94,14 @@ static long read_interp(uint8_t const *bytes, Elf64_Phdr const *phdr, uint8_t **
 static int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo, bool is_interp, errstr_t errstr);
 static long page_size();
 static void jmp_to_payload(uint8_t const *addr, uint8_t *sp);
-static void set_map_name(uint8_t const *ptr, size_t sz, char const *name);
+static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name);
 static int phdr_name(Elf64_Phdr const *phdr, char **name);
+
+#ifdef DEBUGG
+#define dbgprintf(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define dbgprintf(...)
+#endif
 
 /* 'n' must be a power of 2 */
 #define ALIGN_STACK(x, n) ((x) + (n) - (x) % (n))
@@ -347,11 +353,11 @@ static int reprotect_maps()
     return 0;
 }
 
-static void set_map_name(uint8_t const *ptr, size_t sz, char const *name)
+static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name)
 {
-    #ifdef PR_SET_VMA_ANON_NAME
+#if defined(DEBUGG) && defined(PR_SET_VMA_ANON_NAME)
     prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, ptr, sz, name);
-    #endif
+#endif
 }
 
 static int phdr_name(Elf64_Phdr const *phdr, char **name)
@@ -424,7 +430,7 @@ static int map_segment(Elf64_Phdr const *phdr, uint8_t const *bytes, uint8_t con
     }
 
     phdr_name(phdr, &name);
-    set_map_name(seg, sz, name);
+    dbg_set_map_name(seg, sz, name);
     free(name);
 
     // // Copy segment into memory and zero the remainder of the last page
@@ -533,7 +539,7 @@ static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
     case AT_NULL:
         return true;
     default:
-        fprintf(stderr, "Unknown auxv a_type %zu\n", ent->a_type);
+        dbgprintf("Unknown auxv a_type %zu\n", ent->a_type);
         return true;
     }
 }
@@ -665,7 +671,7 @@ static void* dup_stack(Elf64_Ehdr const* ehdr, struct loadinfo* loadinfo, struct
         perror("mmap()");
         exit(errno);
     }
-    set_map_name(stack.base, stack_sz + 1, "stack");
+    dbg_set_map_name(stack.base, stack_sz + 1, "stack");
     stack.base += stack_sz;
 
     st = calloc(1, sizeof(struct strtable));

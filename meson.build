@@ -16,7 +16,10 @@ if not fs.is_absolute(payload_path)
 endif
 
 conf.set('mlock_or_die', get_option('mlock_or_die'))
-conf.set('interp', get_option('interp'))
+opt_debugg = get_option('debugg')
+
+conf.set('INTERP', get_option('interp'))
+conf.set('DEBUGG', opt_debugg)
 
 pack_args = [
     './pack.py',
@@ -35,18 +38,17 @@ packed = custom_target(
 
 deps = []
 cflags = [
-    '-fno-stack-protector', '-fverbose-asm', '-masm=intel',
-    '-fsanitize=undefined',
-
-    '-Wall', '-Wextra', '-Wundef',
+    '-fno-stack-protector', '-masm=intel', '-Wall', '-Wextra', '-Wundef',
     '-Wshadow', '-Wpointer-arith', '-Wcast-align', '-Wstrict-overflow=5',
-    '-Wwrite-strings', '-Waggregate-return', '-Wcast-qual',
-    '-Wswitch-enum', '-Wunreachable-code',
-
-    '-Wno-unused-parameter'
-
+    '-Wwrite-strings', '-Waggregate-return', '-Wcast-qual', '-Wswitch-enum',
+    '-Wunreachable-code', '-Wno-unused-parameter'
 ]
-ldflags = ['-static', '-fsanitize=undefined']
+ldflags = ['-static']
+
+if opt_debugg
+    cflags += ['-fverbose-asm', '-fsanitize=undefined']
+    ldflags += ['-fsanitize=undefined']
+endif
 
 tinyaes_proj = cmake.subproject('tinyaes')
 tinyaes_dep = tinyaes_proj.dependency('tiny-aes')
