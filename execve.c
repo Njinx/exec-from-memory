@@ -405,6 +405,7 @@ static int map_segment(Elf64_Phdr const *phdr, uint8_t const *bytes, uint8_t con
 {
     int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED;
     int prot = PROT_NONE;
+    bool needs_reprotect;
     uint8_t const *addr;
     uint8_t *aligned_addr, *seg;
     size_t sz;
@@ -422,7 +423,7 @@ static int map_segment(Elf64_Phdr const *phdr, uint8_t const *bytes, uint8_t con
     assert(aligned_addr >= base_addr && aligned_addr + sz <= base_addr + base_addr_sz);
     assert(phdr->p_memsz > 0);
 
-    /* We need write permission to write to these pages, we'll remove it later with reprotect_maps() */
+    needs_reprotect = (prot & PROT_WRITE) ? false : true;
     seg = mmap(aligned_addr, sz, prot | PROT_WRITE, flags, -1, 0);
     if (seg == MAP_FAILED) {
         perror("mmap()");
@@ -438,12 +439,13 @@ static int map_segment(Elf64_Phdr const *phdr, uint8_t const *bytes, uint8_t con
     memcpy(seg + (addr - aligned_addr), bytes + phdr->p_offset, phdr->p_filesz);
     // memset(seg + sz, 0, PAGE_CEIL(sz) - sz);
 
-    struct mapinfo minfo = {
-        .ptr = seg,
-        .len = PAGE_CEIL(sz),
-        .prot = prot,
-    };
-    append_to_maptable(minfo);
+    if (needs_reprotect) {
+        append_to_maptable((struct mapinfo) {
+            .ptr = seg,
+            .len = PAGE_CEIL(sz),
+            .prot = prot,
+        });
+    }
 
     *errstr = NULL;
     return 0;
