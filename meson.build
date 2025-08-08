@@ -15,7 +15,6 @@ if not fs.is_absolute(payload_path)
     payload_path = join_paths(meson.project_source_root(), payload_path)
 endif
 
-conf.set('mlock_or_die', get_option('mlock_or_die'))
 opt_debugg = get_option('debugg')
 
 conf.set('INTERP', get_option('interp'))

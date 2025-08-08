@@ -17,12 +17,6 @@ option(
     description: 'AES key to use for payload encryption/decryption',
 )
 option(
-    'mlock_or_die',
-    type: 'boolean',
-    value: true,
-    description: 'Exit if swapping behavior cannot be disabled',
-)
-option(
     'interp',
     type: 'string',
     value: '',
