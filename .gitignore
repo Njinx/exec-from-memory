@@ -1,4 +1,9 @@
 builddir/
 .vscode/
+.idea/
+.venv/
 subprojects/packagecache
 subprojects/tinyaes
+subprojects/cvector
+.gdb_history
+test
