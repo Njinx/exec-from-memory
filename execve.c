@@ -620,24 +620,21 @@ static void make_strtable(stack_t *stack, struct strtable *st, struct main_args 
 
     st->arg.sz = sizeof(*st->arg.v) * (st->arg.c + 1);
     st->arg.v = malloc(st->arg.sz);
-    *(size_t*)stack_curr(*stack) = 0L;
-    stack->pos += sizeof(size_t);
-    for (i = st->arg.c - 1; i >= 0; --i) {
+    for (i = 0; i < st->arg.c; ++i) {
         st->arg.v[i] = copy_to_strtable(stack, margs->argv[i], -1);
     }
+    st->arg.v[i] = NULL;
 
     for (st->env.c = 0, env = environ; *env != NULL; ++env, ++st->env.c)
         ;
 
     st->env.sz = sizeof(*st->env.p) * (st->env.c + 1);
     st->env.p = malloc(st->env.sz);
-    *(size_t*)stack_curr(*stack) = 0L;
-    stack->pos += sizeof(size_t);
     env = environ;
-    st->env.p[0] = NULL;
-    for (i = 1; *env != NULL; ++env, ++i) {
+    for (i = 0; *env != NULL; ++env, ++i) {
         st->env.p[i] = copy_to_strtable(stack, *env, -1);
     }
+    st->env.p[i] = NULL;
 }
 
 static void free_strtable(struct strtable *st)
