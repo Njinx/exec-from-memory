@@ -1,14 +1,24 @@
 # Execute payload from memory
 
-Bundles and encrypts a payload into a static binary. The unencrypted payload will never touch disk.
+Encrypts and bundles a payload into a static binary and executes it without `execve()`.
 
 ## Building
+
+### Prerequisites
+
+- Python 3.10 or newer
+- Meson
+- Ninja
+
+```sh
+pip install -r requirements.txt
+```
 
 ### Normal
 
 ```sh
 # Configure
-meson setup builddir --buildtype=release -Dpayload=/path/to/payload
+meson setup builddir --buildtype=release -Dpayload=/path/to/payload -Daes_key=11223344556677889900aabbccddeeff
 
 # Build
 meson compile -C builddir
@@ -21,7 +31,7 @@ meson compile -C builddir
 
 ```sh
 # Configure
-CC=musl-gcc meson setup builddir --buildtype=release -Dstatic=true -Dpayload=/path/to/payload
+CC=musl-gcc meson setup builddir --buildtype=release -Dpayload=/path/to/payload -Daes_key=11223344556677889900aabbccddeeff
 
 # Build
 meson compile -C builddir
