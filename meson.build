@@ -17,7 +17,7 @@ endif
 
 opt_debugg = get_option('debugg')
 
-conf.set('INTERP', get_option('interp'))
+conf.set('INTERP_OVERRIDE', get_option('interp'))
 conf.set('DEBUGG', opt_debugg)
 
 pack_args = [
