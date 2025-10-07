@@ -55,7 +55,7 @@ int main(int argc, char* argv[], char* envp[])
     aes_decrypt(&plaintext);
 
     char const *errstr = NULL;
-    if (ulexecve(plaintext, plaintext_len, argv, envp, &errstr) < 0) {
+    if (ulexecve(plaintext, plaintext_len, argv, envp, &errstr)) {
         if (*errstr) {
             fprintf(stderr, "ulexecve(): %s\n", errstr);
         } else {
@@ -64,5 +64,5 @@ int main(int argc, char* argv[], char* envp[])
         exit(EXIT_FAILURE);
     }
 
-    return 0;
+    return 1;
 }
