@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
 
 #include <assert.h>
-#include <elf.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,107 +16,8 @@
 #include <cvector.h>
 
 #include "execve.h"
+#include "execve_internal.h"
 #include "config.h"
-
-struct main_args {
-    char *const *argv;
-    char *const *envp;
-};
-
-typedef struct {
-    size_t a_type;
-    union {
-        size_t a_val;
-        void *a_ptr;
-        void (*a_fcn)();
-    } a_un;
-} auxv_t;
-
-typedef struct {
-    uint8_t *base;
-    size_t pos;
-} stack_t;
-
-typedef char const **errstr_t;
-
-#define stack_curr(stack) ((stack).base - (stack).pos)
-
-struct auxinfo {
-    uint8_t *phdr;
-    long phent;
-    long phnum;
-    uint8_t *entry;
-    uint8_t *base;
-};
-
-/* Contains pointers to all string table objects */
-struct strtable {
-    struct {
-        char **v;
-        int c;
-        size_t sz;
-    } arg;
-    struct {
-        char **p;
-        int c;
-        size_t sz;
-    } env;
-    auxv_t *auxv;
-    size_t auxv_sz;
-};
-
-struct loadinfo {
-    uint8_t *interp_base_addr;
-    uint8_t *prog_base_addr;
-    size_t interp_entry;
-    size_t prog_entry;
-    bool is_stack_exec;
-};
-
-struct mapinfo {
-    void *ptr;
-    size_t len;
-    int prot;
-};
-
-static void *dup_stack(Elf64_Ehdr const *ehdr, struct loadinfo *loadinfo, struct main_args *margs);
-static void free_strtable(struct strtable* st);
-static void make_strtable(stack_t *stack, struct strtable *st, struct main_args *margs);
-static void dup_auxv(stack_t *stack, struct auxinfo *auxinfo, struct strtable *st);
-static bool handle_auxv_ent(stack_t *stack, struct auxinfo* info, auxv_t* ent);
-static void *copy_to_strtable(stack_t *stack, char *src, ssize_t len);
-static int reprotect_maps();
-static void append_to_maptable(struct mapinfo map);
-static int map_segment(Elf64_Phdr const *phdr, uint8_t const *bytes, uint8_t const* base_addr, size_t base_addr_sz, errstr_t errstr);
-static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr);
-static long read_interp(uint8_t const *bytes, Elf64_Phdr const *phdr, uint8_t **data, errstr_t errstr);
-static int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo, bool is_interp, errstr_t errstr);
-static long page_size();
-static void jmp_to_payload(uint8_t const *addr, uint8_t *sp);
-static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name);
-static int phdr_name(Elf64_Phdr const *phdr, char **name);
-
-#ifdef DEBUGG
-#define dbgprintf(...) fprintf(stderr, __VA_ARGS__)
-#else
-#define dbgprintf(...)
-#endif
-
-/* 'n' must be a power of 2 */
-#define ALIGN_STACK(x, n) ((x) + (n) - (x) % (n))
-
-#define PAGE_FLOOR(x) ((size_t)(x) - (size_t)(x) % page_size())
-#define PAGE_CEIL(x) ((size_t)(x) + page_size() - (size_t)(x) % page_size() - 1)
-
-#define EHDR(base) ((Elf64_Ehdr const *)(base))
-#define PHDR(base, i) ((Elf64_Phdr const *)((uint8_t const *)(base) + EHDR(base)->e_phoff + sizeof(Elf64_Phdr) * (i)))
-
-/* The size in bytes that argc takes up on the stack. This is different than the size of
- * argc's type. On x86 ILP32 and x86_64 LP64 it's the word size and I bet this holds true on
- * other platforms.
- */
-#define ARGC_STORE_SZ sizeof(size_t)
-#define STACK_ALIGN 16
 
 static long _page_sz = -1;
 cvector_vector_type(struct mapinfo) maptable = NULL;
@@ -134,7 +34,7 @@ static long page_size()
     return _page_sz;
 }
 
-static long read_interp(uint8_t const *bytes, Elf64_Phdr const *phdr, uint8_t **data, errstr_t errstr)
+static long read_interp(uint8_t const *bytes, ElfW(Phdr) const *phdr, uint8_t **data, errstr_t errstr)
 {
     char const *path;
     struct stat info;
@@ -168,7 +68,7 @@ static long read_interp(uint8_t const *bytes, Elf64_Phdr const *phdr, uint8_t **
 
 static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr)
 {
-    Elf64_Ehdr const*ehdr = EHDR(bytes);
+    ElfW(Ehdr) const*ehdr = EHDR(bytes);
 
     if (len < SELFMAG) {
         *errstr = "Bad executable size\n";
@@ -182,7 +82,7 @@ static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr)
         *errstr = "Not an executable file\n";
         return -1;
     }
-    if (ehdr->e_phentsize != sizeof(Elf64_Phdr)) {
+    if (ehdr->e_phentsize != sizeof(ElfW(Phdr))) {
         *errstr = "Bad Phdr size\n";
         return -1;
     }
@@ -192,8 +92,8 @@ static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr)
 
 static int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo, bool is_interp, errstr_t errstr)
 {
-    Elf64_Ehdr const *ehdr = EHDR(bytes);
-    Elf64_Phdr const *phdr;
+    ElfW(Ehdr) const *ehdr = EHDR(bytes);
+    ElfW(Phdr) const *phdr;
     size_t base_addr_sz;
     int prot, flags;
     uint8_t *base_addr;
@@ -360,7 +260,7 @@ static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name)
 #endif
 }
 
-static int phdr_name(Elf64_Phdr const *phdr, char **name)
+static int phdr_name(ElfW(Phdr) const *phdr, char **name)
 {
     char const *pt;
     char prot[4];
@@ -401,7 +301,7 @@ static int phdr_name(Elf64_Phdr const *phdr, char **name)
     return snprintf(*name, len, fmt, prot, phdr->p_offset, pt);
 }
 
-static int map_segment(Elf64_Phdr const *phdr, uint8_t const *bytes, uint8_t const *base_addr, size_t base_addr_sz, errstr_t errstr)
+static int map_segment(ElfW(Phdr) const *phdr, uint8_t const *bytes, uint8_t const *base_addr, size_t base_addr_sz, errstr_t errstr)
 {
     int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED;
     int prot = PROT_NONE;
@@ -652,7 +552,7 @@ static void free_strtable(struct strtable *st)
     st->auxv = NULL;
 }
 
-static void* dup_stack(Elf64_Ehdr const* ehdr, struct loadinfo* loadinfo, struct main_args* margs)
+static void* dup_stack(ElfW(Ehdr) const* ehdr, struct loadinfo* loadinfo, struct main_args* margs)
 {
     stack_t stack; // This points to the top of the stack
     size_t stack_sz = 1024 * 1024 * 10; // 10MB
@@ -737,7 +637,6 @@ static void jmp_to_payload(uint8_t const *addr, uint8_t *sp)
         "xor rdx, rdx\n"
         "xor rax, rax\n"
         "xor rbx, rbx\n"
-        "xor rbp, rbp\n"
         "xor rcx, rcx\n"
         "xor rdi, rdi\n"
         "xor rsi, rsi\n"
