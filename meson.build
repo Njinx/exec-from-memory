@@ -34,8 +34,6 @@ packed = custom_target(
     build_always_stale: true,
     build_by_default: true,
 )
-
-deps = []
 cflags = [
     '-fno-stack-protector', '-masm=intel', '-Wall', '-Wextra', '-Wundef',
     '-Wshadow', '-Wpointer-arith', '-Wcast-align', '-Wstrict-overflow=5',
@@ -51,18 +49,33 @@ endif
 
 tinyaes_proj = cmake.subproject('tinyaes')
 tinyaes_dep = tinyaes_proj.dependency('tiny-aes')
-deps += [tinyaes_dep]
 
 cvector_proj = cmake.subproject('cvector')
 cvector_dep = cvector_proj.dependency('c-vector')
-deps += [cvector_dep]
+
+unity_proj = subproject('unity')
+unity_dep = unity_proj.get_variable('unity_dep')
+unity_runner_gen = unity_proj.get_variable('gen_test_runner')
+
+test_execve = executable('test_execve',
+    sources: [
+        'execve.c',
+        'execve_test.c',
+        unity_runner_gen.process(meson.project_source_root() / 'execve_test.c'),
+    ],
+    dependencies: [unity_dep, cvector_dep],
+    c_args: [cflags] + ['-DUNITY_TEST'],
+    link_args: ldflags,
+    d_unittest: true,
+)
+
+test(test_execve.name(), test_execve)
 
 configure_file(input: 'config.h.in', output: 'config.h', configuration: conf)
 
-executable(
-    'executor',
-    ['main.c', 'execve.c', 'execve.h', packed],
-    dependencies: deps,
+executable('executor',
+    sources: ['main.c', 'execve.c', 'execve.h', packed],
+    dependencies: [tinyaes_dep, cvector_dep],
     c_args: cflags,
     link_args: ldflags,
 )
