@@ -2,8 +2,7 @@ builddir/
 .vscode/
 .idea/
 .venv/
-subprojects/packagecache
-subprojects/tinyaes
-subprojects/cvector
+subprojects/*
+!subprojects/*.wrap
 .gdb_history
 test

@@ -19,6 +19,22 @@
 #include "execve_internal.h"
 #include "config.h"
 
+static void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *loadinfo, struct main_args *margs);
+static void free_strtable(struct strtable* st);
+static void make_strtable(stack_t *stack, struct strtable *st, struct main_args *margs);
+static void dup_auxv(stack_t *stack, struct auxinfo *auxinfo, struct strtable *st);
+static bool handle_auxv_ent(stack_t *stack, struct auxinfo* info, auxv_t* ent);
+static void *copy_to_strtable(stack_t *stack, char *src, ssize_t len);
+static int reprotect_maps();
+static int map_segment(ElfW(Phdr) const *phdr, uint8_t const *bytes, uint8_t const* base_addr, size_t base_addr_sz, errstr_t errstr);
+static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr);
+static long read_interp(uint8_t const *bytes, ElfW(Phdr) const *phdr, uint8_t **data, errstr_t errstr);
+static int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo, bool is_interp, errstr_t errstr);
+static long page_size();
+static void jmp_to_payload(uint8_t const *addr, uint8_t *sp);
+static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name);
+static int phdr_name(ElfW(Phdr) const *phdr, char **name);
+
 static long _page_sz = -1;
 cvector_vector_type(struct mapinfo) maptable = NULL;
 
@@ -232,7 +248,7 @@ int ulexecve(unsigned char const* bytes, size_t len, char* const argv[], char* c
     return -1;
 }
 
-static void append_to_maptable(struct mapinfo map)
+testable_c(static) void append_to_maptable(struct mapinfo map)
 {
     cvector_push_back(maptable, map);
 }
