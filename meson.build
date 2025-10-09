@@ -1,4 +1,4 @@
-project('exec-from-memory', 'c', default_options: ['c_std=c99'])
+project('exec-from-memory', 'c', default_options: ['c_std=c99'], meson_version: '>=1.3.0')
 
 fs = import('fs')
 cmake = import('cmake')
@@ -43,8 +43,13 @@ cflags = [
 ldflags = ['-static']
 
 if opt_debugg
-    cflags += ['-fverbose-asm', '-fsanitize=undefined']
-    ldflags += ['-fsanitize=undefined']
+    cflags += ['-g', '-fverbose-asm']
+
+    # Some runtimes (musl) don't support this sanitizer
+    if meson.get_compiler('c').has_define('__GLIBC__')
+        cflags += ['-fsanitize=undefined']
+        ldflags += ['-fsanitize=undefined']
+    endif
 endif
 
 tinyaes_proj = cmake.subproject('tinyaes')
