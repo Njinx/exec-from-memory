@@ -6,8 +6,8 @@ Encrypts and bundles a payload into a static binary and executes it without `exe
 
 ### Prerequisites
 
-- Python 3.10 or newer
-- Meson
+- Python >= 3.10
+- Meson >= 1.3.0
 - Ninja
 
 ```sh
