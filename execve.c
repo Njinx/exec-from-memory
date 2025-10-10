@@ -529,7 +529,6 @@ static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* s
 static void make_strtable(stack_t *stack, struct strtable *st, struct main_args *margs)
 {
     int i;
-    char **env;
 
     for (st->arg.c = 0; margs->argv[st->arg.c]; ++st->arg.c)
         ;
@@ -541,14 +540,13 @@ static void make_strtable(stack_t *stack, struct strtable *st, struct main_args 
     }
     st->arg.v[i] = NULL;
 
-    for (st->env.c = 0, env = environ; *env != NULL; ++env, ++st->env.c)
+    for (st->env.c = 0; margs->envp[st->env.c]; ++st->env.c)
         ;
 
     st->env.sz = sizeof(*st->env.p) * (st->env.c + 1);
     st->env.p = malloc(st->env.sz);
-    env = environ;
-    for (i = 0; *env != NULL; ++env, ++i) {
-        st->env.p[i] = copy_to_strtable(stack, *env, -1);
+    for (i = 0; i < st->env.c; ++i) {
+        st->env.p[i] = copy_to_strtable(stack, margs->envp[i], -1);
     }
     st->env.p[i] = NULL;
 }
