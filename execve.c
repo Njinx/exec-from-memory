@@ -31,6 +31,7 @@ static long page_size();
 static void jmp_to_payload(uint8_t const *addr, uint8_t *sp);
 static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name);
 static int phdr_name(ElfW(Phdr) const *phdr, char **name);
+static void *get_entrypoint(struct loadinfo *loadinfo);
 
 static long _page_sz = -1;
 cvector_vector_type(struct mapinfo) maptable = NULL;
@@ -196,6 +197,15 @@ testable_c(static) int load_elf(uint8_t const *bytes, size_t len, struct loadinf
     return 0;
 }
 
+static void *get_entrypoint(struct loadinfo *loadinfo)
+{
+    if (loadinfo->interp_base_addr) {
+        return loadinfo->interp_base_addr + loadinfo->interp_entry;
+    } else {
+        return loadinfo->prog_base_addr + loadinfo->prog_entry;
+    }
+}
+
 int ulexecve(unsigned char const* bytes, size_t len, char* const argv[], char* const envp[], char const **errstr)
 {
     uint8_t const *jmp_addr;
@@ -227,11 +237,7 @@ int ulexecve(unsigned char const* bytes, size_t len, char* const argv[], char* c
         return -1;
     }
 
-    if (loadinfo.interp_base_addr) {
-        jmp_addr = loadinfo.interp_base_addr + loadinfo.interp_entry;
-    } else {
-        jmp_addr = loadinfo.prog_base_addr + loadinfo.prog_entry;
-    }
+    jmp_addr = get_entrypoint(&loadinfo);
     assert(jmp_addr && sp);
 
     if (reprotect_maps() < 0) {
@@ -241,7 +247,6 @@ int ulexecve(unsigned char const* bytes, size_t len, char* const argv[], char* c
 
     jmp_to_payload(jmp_addr, sp);
 
-    fprintf(stderr, "BUG: Return from execve? We shouldn't be here!!!\n");
     *errstr = NULL;
     return -1;
 }
@@ -498,7 +503,7 @@ testable_c(static) void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct
     auxv_t *ent;
     for (i = 0; i < sizeof(required_at) / sizeof(*required_at); ++i) {
         found = false;
-        for (ent = auxv_tmp; ent->a_type != AT_NULL; ++ent) {
+        for (ent = cvector_begin(auxv_tmp); ent->a_type != AT_NULL; ++ent) {
             if (ent->a_type == required_at[i]) {
                 found = true;
                 break;
