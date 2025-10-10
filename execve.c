@@ -486,21 +486,18 @@ static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* s
             }
         }
 
-        if (handle_auxv_ent(stack, auxinfo, &auxv_ent)) {
-            cvector_push_back(auxv_tmp, auxv_ent);
-        }
         if (auxv_ent.a_type == AT_NULL) {
             break;
         }
+        if (handle_auxv_ent(stack, auxinfo, &auxv_ent)) {
+            cvector_push_back(auxv_tmp, auxv_ent);
+        }
     }
-
-    assert(cvector_back(auxv_tmp)->a_type == AT_NULL);
 
     /* Add required entries that may not be present in the current process */
     size_t i;
     bool found;
     auxv_t *ent;
-    auxv_t tmp_ent;
     for (i = 0; i < sizeof(required_at) / sizeof(*required_at); ++i) {
         found = false;
         for (ent = auxv_tmp; ent->a_type != AT_NULL; ++ent) {
@@ -511,13 +508,17 @@ static void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* s
         }
 
         if (!found) {
-            tmp_ent.a_type = required_at[i];
-            if (!handle_auxv_ent(stack, auxinfo, &tmp_ent)) {
+            auxv_ent.a_type = required_at[i];
+            if (handle_auxv_ent(stack, auxinfo, &auxv_ent)) {
+                cvector_push_back(auxv_tmp, auxv_ent);
+            } else {
                 fprintf(stderr, "handle_auxv_ent(): required argument was skipped.\n");
             }
-            cvector_push_back(auxv_tmp, auxv_ent);
         }
     }
+    auxv_ent.a_type = AT_NULL;
+    auxv_ent.a_un.a_val = 0L;
+    cvector_push_back(auxv_tmp, auxv_ent);
 
     st->auxv_sz = cvector_size(auxv_tmp) * sizeof(auxv_t);
     st->auxv = malloc(st->auxv_sz);
