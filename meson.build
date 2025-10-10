@@ -12,7 +12,7 @@ if payload_path == ''
 endif
 
 if not fs.is_absolute(payload_path)
-    payload_path = join_paths(meson.project_source_root(), payload_path)
+    payload_path = meson.project_source_root() / payload_path
 endif
 
 opt_debugg = get_option('debugg')
@@ -62,21 +62,33 @@ unity_proj = subproject('unity')
 unity_dep = unity_proj.get_variable('unity_dep')
 unity_runner_gen = unity_proj.get_variable('gen_test_runner')
 
+test_files_base = ['elf1.bin', 'auxv1.bin']
+test_files = []
+foreach test_file : test_files_base
+    test_files += ['tests' / 'files' / test_file]
+endforeach
+
+foreach test_file : test_files
+    fs.copyfile(test_file)
+endforeach
+
+configure_file(input: 'config.h.in', output: 'config.h', configuration: conf)
+
 test_execve = executable('test_execve',
     sources: [
         'execve.c',
-        'execve_test.c',
-        unity_runner_gen.process(meson.project_source_root() / 'execve_test.c'),
+        'tests' / 'test_utils.c',
+        'tests' / 'execve_test.c',
+        unity_runner_gen.process(meson.project_source_root() / 'tests' / 'execve_test.c'),
     ],
     dependencies: [unity_dep, cvector_dep],
     c_args: [cflags] + ['-DUNITY_TEST'],
     link_args: ldflags,
     d_unittest: true,
+    install: false,
 )
 
 test(test_execve.name(), test_execve)
-
-configure_file(input: 'config.h.in', output: 'config.h', configuration: conf)
 
 executable('executor',
     sources: ['main.c', 'execve.c', 'execve.h', packed],
