@@ -11,12 +11,6 @@ option(
     description: 'AES key to use for payload encryption/decryption',
 )
 option(
-    'debugg',
-    type: 'boolean',
-    value: false,
-    description: 'Enable/disable various debugging facilities',
-)
-option(
     'stack_size',
     type: 'integer',
     value: -1,
