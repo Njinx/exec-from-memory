@@ -74,7 +74,7 @@ unity_proj = subproject('unity')
 unity_dep = unity_proj.get_variable('unity_dep')
 unity_runner_gen = unity_proj.get_variable('gen_test_runner')
 
-test_files_base = ['elf1.bin', 'auxv1.bin']
+test_files_base = ['elf1.bin', 'auxv1.bin', 'auxv2.bin']
 test_files = []
 foreach test_file : test_files_base
     test_files += ['tests' / 'files' / test_file]

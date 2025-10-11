@@ -63,7 +63,7 @@ static rlim_t _get_stack_size_rlimit(void);
 static long _page_sz = -1;
 static rlim_t _stack_sz = 0;
 cvector_vector_type(struct mapinfo) maptable = NULL;
-testable_c(static) char const *auxv_fpath = "/proc/self/auxv";
+testable_c(static) char const *_auxv_fpath = "/proc/self/auxv";
 
 static long page_size()
 {
@@ -501,7 +501,7 @@ testable_c(static) void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct
     auxv_t auxv_ent;
     size_t const required_at[] = { AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM };
 
-    fp = fopen(auxv_fpath, "rb");
+    fp = fopen(_auxv_fpath, "rb");
     if (fp == NULL) {
         perror("fopen()");
         exit(errno);
@@ -529,7 +529,7 @@ testable_c(static) void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct
     size_t i;
     bool found;
     auxv_t *ent;
-    for (i = 0; i < sizeof(required_at) / sizeof(*required_at); ++i) {
+    for (i = 0; i < sizeof_arr(required_at); ++i) {
         found = false;
         for (ent = cvector_begin(auxv_tmp); ent->a_type != AT_NULL; ++ent) {
             if (ent->a_type == required_at[i]) {

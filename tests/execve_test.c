@@ -10,6 +10,10 @@
 
 void test_append_to_maptable(void);
 void test_dup_stack(void);
+void helper_test_dup_stack(
+    char const *elf_fpath, char const *auxv_fpath_input, char const *auxv_fpath_expected,
+    struct main_args *margs, struct loadinfo *li
+);
 void helper_test_argenvp(void **stack, char const *const *expected);
 void helper_test_auxv(void **stack, char const *auxv_fname);
 
@@ -88,14 +92,34 @@ void helper_test_auxv(void **stack, char const *auxv_fname)
     munmap_test_file(bytes, auxvs_sz);
 }
 
+void helper_test_dup_stack(
+    char const *elf_fpath, char const *auxv_fpath_input, char const *auxv_fpath_expected,
+    struct main_args *margs, struct loadinfo *li
+) {
+    uint8_t *elf;
+    size_t elf_sz = mmap_test_file(elf_fpath, &elf);
+    uint8_t *stack;
+    char const *auxv_fpath_og = _auxv_fpath;
+    int argv_len;
+
+    for (argv_len = 0; margs->argv[argv_len]; ++argv_len)
+        ;
+
+    _auxv_fpath = auxv_fpath_input;
+    stack = (uint8_t *)dup_stack((ElfW(Ehdr) *)elf, li, margs);
+    munmap_test_file(elf, elf_sz);
+
+    TEST_ASSERT(*(int *)stack == argv_len);
+    stack += sizeof(size_t);
+    helper_test_argenvp((void **)&stack, margs->argv);
+    helper_test_argenvp((void **)&stack, margs->envp);
+    helper_test_auxv((void **)&stack, auxv_fpath_expected);
+    _auxv_fpath = auxv_fpath_og;
+}
+
 void test_dup_stack(void)
 {
-    uint8_t *elf;
-    size_t elf_sz = mmap_test_file("elf1.bin", &elf);
-    uint8_t *stack;
-    char const *auxv_fpath_og = auxv_fpath;
-
-    struct loadinfo loadinfo = {
+    struct loadinfo li = {
         .interp_base_addr = (uint8_t *)0x00112233,
         .prog_base_addr = (uint8_t *)0x44556677,
         .interp_entry = 1234L,
@@ -110,14 +134,25 @@ void test_dup_stack(void)
         .envp = envp,
     };
 
-    auxv_fpath = "auxv1.bin";
-    stack = (uint8_t *)dup_stack((ElfW(Ehdr) *)elf, &loadinfo, &margs);
-    munmap_test_file(elf, elf_sz);
+    helper_test_dup_stack("elf1.bin", "auxv1.bin", "auxv1.bin", &margs, &li);
+}
 
-    TEST_ASSERT(*(int *)stack == (sizeof(argv) / sizeof(*argv)) - 1);
-    stack += sizeof(size_t);
-    helper_test_argenvp((void **)&stack, argv);
-    helper_test_argenvp((void **)&stack, envp);
-    helper_test_auxv((void **)&stack, auxv_fpath);
-    auxv_fpath = auxv_fpath_og;
+void test_dup_stack_missing_required_entries(void)
+{
+    struct loadinfo li = {
+        .interp_base_addr = (uint8_t *)0x00112233,
+        .prog_base_addr = (uint8_t *)0x44556677,
+        .interp_entry = 1234L,
+        .prog_entry = 5678L,
+        .is_stack_exec = false,
+    };
+
+    char const *const argv[] = {"arg1", "arg2", NULL};
+    char const *const envp[] = {"k1=v1", "k2=v2", NULL};
+    struct main_args margs = {
+        .argv = argv,
+        .envp = envp,
+    };
+
+    helper_test_dup_stack("elf1.bin", "auxv2.bin", "auxv1.bin", &margs, &li);
 }
