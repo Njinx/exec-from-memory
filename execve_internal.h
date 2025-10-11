@@ -83,6 +83,12 @@ struct mapinfo {
     size_t len;
     int prot;
 };
+testable_h(static) void append_to_maptable(struct mapinfo map);
+testable_h(static) void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *loadinfo, struct main_args *margs);
+testable_h(static) int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo, bool is_interp, errstr_t errstr);
+testable_h(static) void dup_auxv(stack_t *stack, struct auxinfo *auxinfo, struct strtable *st);
+
+testable_h(static) char const *_auxv_fpath;
 
 #ifdef DEBUGG
 #define dbgprintf(...) fprintf(stderr, __VA_ARGS__)
@@ -90,11 +96,6 @@ struct mapinfo {
 #define dbgprintf(...)
 #endif
 
-testable_h(static) void append_to_maptable(struct mapinfo map);
-testable_h(static) void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *loadinfo, struct main_args *margs);
-testable_h(static) int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo, bool is_interp, errstr_t errstr);
-testable_h(static) void dup_auxv(stack_t *stack, struct auxinfo *auxinfo, struct strtable *st);
-
-testable_h(static) char const *auxv_fpath;
+#define sizeof_arr(arr) (sizeof(arr) / sizeof(*arr))
 
 #endif /* __EXECVE_INTERNAL_H */
