@@ -25,24 +25,6 @@
 #define testable_c(mod) mod
 #endif
 
-/* 'n' must be a power of 2 */
-#define ALIGN_STACK(x, n) ((x) + (n) - (x) % (n))
-
-#define PAGE_FLOOR(x) ((size_t)(x) - (size_t)(x) % page_size())
-#define PAGE_CEIL(x) ((size_t)(x) + page_size() - (size_t)(x) % page_size() - 1)
-
-#define EHDR(base) ((ElfW(Ehdr) const *)(base))
-#define PHDR(base, i) ((ElfW(Phdr) const *)((uint8_t const *)(base) + EHDR(base)->e_phoff + sizeof(ElfW(Phdr)) * (i)))
-
-/* The size in bytes that argc takes up on the stack. This is different than the size of
- * argc's type. On x86 ILP32 and x86_64 LP64 it's the word size and I bet this holds true on
- * other platforms.
- */
-#define ARGC_STORE_SZ sizeof(size_t)
-#define STACK_ALIGN 16
-
-#define stack_curr(stack) ((stack).base - (stack).pos)
-
 struct main_args {
     char *const *argv;
     char *const *envp;
