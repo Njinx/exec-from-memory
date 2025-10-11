@@ -13,8 +13,8 @@
 #include "execve.h"
 #include "payload.h"
 
+int main(int argc, char const *const *argv, char const *const *envp);
 void aes_decrypt(unsigned char** plaintext);
-int main(int argc, char* argv[], char* envp[]);
 
 void aes_decrypt(unsigned char** plaintext)
 {
@@ -47,7 +47,7 @@ void aes_decrypt(unsigned char** plaintext)
     }
 }
 
-int main(int argc, char* argv[], char* envp[])
+int main(int argc, char const *const *argv, char const *const *envp)
 {
     unsigned char* plaintext;
 

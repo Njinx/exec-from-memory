@@ -26,8 +26,8 @@
 #endif
 
 struct main_args {
-    char *const *argv;
-    char *const *envp;
+    char const *const *argv;
+    char const *const *envp;
 };
 
 typedef struct {
