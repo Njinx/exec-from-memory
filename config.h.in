@@ -1,7 +1,8 @@
 #ifndef __CONFIG_H
 #define __CONFIG_H
 
-#define INTERP_OVERRIDE "@INTERP_OVERRIDE@"
+#mesondefine INTERP_OVERRIDE
 #mesondefine DEBUGG
+#mesondefine STACK_SIZE
 
 #endif /* __CONFIG_H */

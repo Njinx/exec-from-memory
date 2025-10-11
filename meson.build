@@ -5,26 +5,38 @@ cmake = import('cmake')
 
 conf = configuration_data()
 
-payload_path = get_option('payload')
+opt_interp = get_option('interp')
+opt_payload_path = get_option('payload')
+opt_aes_key = get_option('aes_key')
+opt_stack_size = get_option('stack_size')
+opt_debugg = get_option('debugg')
 
-if payload_path == ''
+if opt_payload_path == ''
     error('-Dpayload not specified')
 endif
 
-if not fs.is_absolute(payload_path)
-    payload_path = meson.project_source_root() / payload_path
+if opt_aes_key == '11223344556677889900aabbccddeeff'
+    warning('Using default AES key')
 endif
 
-opt_debugg = get_option('debugg')
+if opt_stack_size == 0
+    error('-Dstack_size must be greater than 0')
+elif opt_stack_size != -1
+    conf.set('STACK_SIZE', opt_stack_size)
+endif
 
-conf.set('INTERP_OVERRIDE', get_option('interp'))
+conf.set('INTERP_OVERRIDE', '"@0@"'.format(opt_interp))
 conf.set('DEBUGG', opt_debugg)
+
+if not fs.is_absolute(opt_payload_path)
+    opt_payload_path = meson.project_source_root() / opt_payload_path
+endif
 
 pack_args = [
     './pack.py',
-    '--input', payload_path,
+    '--input', opt_payload_path,
     '--outdir', '.',
-    '--key', get_option('aes_key'),
+    '--key', opt_aes_key,
 ]
 
 pack_out = ['payload.c', 'payload.h']

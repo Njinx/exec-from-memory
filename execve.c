@@ -12,6 +12,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/prctl.h>
+#include <sys/resource.h>
+#include <limits.h>
 
 #include <cvector.h>
 
@@ -32,8 +34,34 @@ static void jmp_to_payload(uint8_t const *addr, uint8_t *sp);
 static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name);
 static int phdr_name(ElfW(Phdr) const *phdr, char **name);
 static void *get_entrypoint(struct loadinfo *loadinfo);
+static rlim_t _get_stack_size_rlimit(void);
+
+/* 'n' must be a power of 2 */
+#define ALIGN_STACK(x, n) ((x) + (n) - (x) % (n))
+
+#define PAGE_FLOOR(x) ((size_t)(x) - (size_t)(x) % page_size())
+#define PAGE_CEIL(x) ((size_t)(x) + page_size() - (size_t)(x) % page_size() - 1)
+
+#define EHDR(base) ((ElfW(Ehdr) const *)(base))
+#define PHDR(base, i) ((ElfW(Phdr) const *)((uint8_t const *)(base) + EHDR(base)->e_phoff + sizeof(ElfW(Phdr)) * (i)))
+
+/* The size in bytes that argc takes up on the stack. This is different than the size of
+ * argc's type. On x86 ILP32 and x86_64 LP64 it's the word size and I bet this holds true on
+ * other platforms.
+ */
+#define ARGC_STORE_SZ sizeof(size_t)
+#define STACK_ALIGN 16
+
+#define stack_curr(stack) ((stack).base - (stack).pos)
+
+#ifdef STACK_SIZE
+#define get_stack_size() STACK_SIZE
+#else
+#define get_stack_size() _get_stack_size_rlimit()
+#endif
 
 static long _page_sz = -1;
+static rlim_t _stack_sz = 0;
 cvector_vector_type(struct mapinfo) maptable = NULL;
 testable_c(static) char const *auxv_fpath = "/proc/self/auxv";
 
@@ -570,10 +598,31 @@ static void free_strtable(struct strtable *st)
     st->auxv = NULL;
 }
 
+static rlim_t _get_stack_size_rlimit(void)
+{
+    struct rlimit rlim;
+    const rlim_t sane_default = 16384;
+
+    if (_stack_sz != 0) return _stack_sz;
+
+    if (getrlimit(RLIMIT_STACK, &rlim) < 0) {
+        perror("getrlimit(RLIMIT_STACK)");
+        _stack_sz = sane_default;
+
+    /* Not sure if this is even possible but I don't want to deal with */
+    } else if (rlim.rlim_cur == RLIM_INFINITY) {
+        _stack_sz = sane_default;
+    } else {
+        _stack_sz = rlim.rlim_cur;
+    }
+
+    return _stack_sz;
+}
+
 testable_c(static) void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *loadinfo, struct main_args *margs)
 {
     stack_t stack; // This points to the top of the stack
-    size_t stack_sz = 1024 * 1024 * 10; // 10MB
+    rlim_t stack_sz = get_stack_size();
     int prot = PROT_READ | PROT_WRITE;
     int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_GROWSDOWN;
     struct strtable* st;
