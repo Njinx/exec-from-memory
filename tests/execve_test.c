@@ -10,7 +10,7 @@
 
 void test_append_to_maptable(void);
 void test_dup_stack(void);
-void helper_test_argenvp(void **stack, char **expected);
+void helper_test_argenvp(void **stack, char const *const *expected);
 void helper_test_auxv(void **stack, char const *auxv_fname);
 
 extern cvector_vector_type(struct mapinfo) maptable;
@@ -42,7 +42,7 @@ void test_append_to_maptable(void)
     TEST_ASSERT_EQUAL_MEMORY(&map2, curr_map, sizeof(struct mapinfo));
 }
 
-void helper_test_argenvp(void **stack, char **expected)
+void helper_test_argenvp(void **stack, char const *const *expected)
 {
     int i;
     char **_stack = (char **)(*stack);
@@ -103,8 +103,8 @@ void test_dup_stack(void)
         .is_stack_exec = false,
     };
 
-    char *argv[] = {"arg1", "arg2", NULL};
-    char *envp[] = {"k1=v1", "k2=v2", NULL};
+    char const *const argv[] = {"arg1", "arg2", NULL};
+    char const *const envp[] = {"k1=v1", "k2=v2", NULL};
     struct main_args margs = {
         .argv = argv,
         .envp = envp,

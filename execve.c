@@ -24,7 +24,7 @@
 static void free_strtable(struct strtable* st);
 static void make_strtable(stack_t *stack, struct strtable *st, struct main_args *margs);
 static bool handle_auxv_ent(stack_t *stack, struct auxinfo* info, auxv_t* ent);
-static void *copy_to_strtable(stack_t *stack, char *src, ssize_t len);
+static void *copy_to_strtable(stack_t *stack, char const *const src, ssize_t len);
 static int reprotect_maps();
 static int map_segment(ElfW(Phdr) const *phdr, uint8_t const *bytes, uint8_t const* base_addr, size_t base_addr_sz, errstr_t errstr);
 static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr);
@@ -234,7 +234,7 @@ static void *get_entrypoint(struct loadinfo *loadinfo)
     }
 }
 
-int ulexecve(unsigned char const* bytes, size_t len, char* const argv[], char* const envp[], char const **errstr)
+int ulexecve(unsigned char const *bytes, size_t len, char const *const *argv, char const *const *envp, char const **errstr)
 {
     uint8_t const *jmp_addr;
     uint8_t *sp;
@@ -398,7 +398,7 @@ static int map_segment(ElfW(Phdr) const *phdr, uint8_t const *bytes, uint8_t con
     return 0;
 }
 
-static void* copy_to_strtable(stack_t* stack, char* src, ssize_t len)
+static void *copy_to_strtable(stack_t *stack, char const *const src, ssize_t len)
 {
     if (len == -1) {
         len = strlen(src) + 1;
