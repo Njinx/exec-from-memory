@@ -24,7 +24,6 @@
 static void free_strtable(struct strtable* st);
 static void make_strtable(stack_t *stack, struct strtable *st, struct main_args *margs);
 static bool handle_auxv_ent(stack_t *stack, struct auxinfo* info, auxv_t* ent);
-static void *copy_to_strtable(stack_t *stack, char const *const src, ssize_t len);
 static int reprotect_maps();
 static int map_segment(ElfW(Phdr) const *phdr, uint8_t const *bytes, uint8_t const* base_addr, size_t base_addr_sz, errstr_t errstr);
 static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr);
@@ -35,6 +34,9 @@ static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name);
 static int phdr_name(ElfW(Phdr) const *phdr, char **name);
 static void *get_entrypoint(struct loadinfo *loadinfo);
 static rlim_t _get_stack_size_rlimit(void);
+void _stack_assert_has_cap(stack_t *stack, size_t new_cap);
+void stack_add(stack_t *stack, size_t n);
+void stack_align(stack_t *stack, size_t n);
 
 /* 'n' must be a power of 2 */
 #define ALIGN_STACK(x, n) ((x) + (n) - (x) % (n))
@@ -52,7 +54,7 @@ static rlim_t _get_stack_size_rlimit(void);
 #define ARGC_STORE_SZ sizeof(size_t)
 #define STACK_ALIGN 16
 
-#define stack_curr(stack) ((stack).base - (stack).pos)
+#define stack_curr(stack) ((stack)._base - (stack)._pos)
 
 #ifdef STACK_SIZE
 #define get_stack_size() STACK_SIZE
@@ -398,14 +400,35 @@ static int map_segment(ElfW(Phdr) const *phdr, uint8_t const *bytes, uint8_t con
     return 0;
 }
 
-static void *copy_to_strtable(stack_t *stack, char const *const src, ssize_t len)
+void _stack_assert_has_cap(stack_t *stack, size_t new_cap)
 {
-    if (len == -1) {
-        len = strlen(src) + 1;
+    if (new_cap >= stack->_cap) {
+        fprintf(stderr, "Stack has grown too large!\n");
+        exit(1);
+    }
+}
+
+void stack_add(stack_t *stack, size_t n)
+{
+    _stack_assert_has_cap(stack, stack->_pos + n);
+    stack->_pos += n;
+}
+
+void stack_align(stack_t *stack, size_t n)
+{
+    size_t aligned = ALIGN_STACK(stack->_pos, STACK_ALIGN);
+    _stack_assert_has_cap(stack, aligned);
+    stack->_pos = aligned;
+}
+
+testable_c(static) void *copy_to_stack(stack_t *stack, void const *src, ssize_t sz)
+{
+    if (sz == -1) {
+        sz = strlen(src) + 1;
     }
 
-    stack->pos += len;
-    memcpy(stack_curr(*stack), src, len);
+    stack_add(stack, sz);
+    memcpy(stack_curr(*stack), src, sz);
     return stack_curr(*stack);
 }
 
@@ -435,13 +458,13 @@ static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
         ent->a_un.a_val = page_size();
         return true;
     case AT_RANDOM:
-        ent->a_un.a_ptr = copy_to_strtable(stack, (char*)getauxval(AT_RANDOM), 16);
+        ent->a_un.a_ptr = copy_to_stack(stack, (char*)getauxval(AT_RANDOM), 16);
         return true;
 
     case AT_EXECFN:
     case AT_PLATFORM:
     case AT_BASE_PLATFORM:
-        ent->a_un.a_ptr = copy_to_strtable(stack, (char*)getauxval(ent->a_type), -1);
+        ent->a_un.a_ptr = copy_to_stack(stack, (char*)getauxval(ent->a_type), -1);
         return true;
 
     case AT_FLAGS:
@@ -568,7 +591,7 @@ static void make_strtable(stack_t *stack, struct strtable *st, struct main_args 
     st->arg.sz = sizeof(*st->arg.v) * (st->arg.c + 1);
     st->arg.v = malloc(st->arg.sz);
     for (i = 0; i < st->arg.c; ++i) {
-        st->arg.v[i] = copy_to_strtable(stack, margs->argv[i], -1);
+        st->arg.v[i] = copy_to_stack(stack, margs->argv[i], -1);
     }
     st->arg.v[i] = NULL;
 
@@ -578,7 +601,7 @@ static void make_strtable(stack_t *stack, struct strtable *st, struct main_args 
     st->env.sz = sizeof(*st->env.p) * (st->env.c + 1);
     st->env.p = malloc(st->env.sz);
     for (i = 0; i < st->env.c; ++i) {
-        st->env.p[i] = copy_to_strtable(stack, margs->envp[i], -1);
+        st->env.p[i] = copy_to_stack(stack, margs->envp[i], -1);
     }
     st->env.p[i] = NULL;
 }
@@ -619,26 +642,39 @@ static rlim_t _get_stack_size_rlimit(void)
     return _stack_sz;
 }
 
-testable_c(static) void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *loadinfo, struct main_args *margs)
+testable_c(static) int make_stack(stack_t *stack, size_t sz, struct loadinfo *li)
 {
-    stack_t stack; // This points to the top of the stack
-    rlim_t stack_sz = get_stack_size();
     int prot = PROT_READ | PROT_WRITE;
     int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_GROWSDOWN;
-    struct strtable* st;
 
-    stack.pos = 0;
-    stack_sz += stack_sz % page_size();
+    stack->_pos = 0;
+    sz += sz % page_size();
+    stack->_cap = sz;
 
-    if (loadinfo->is_stack_exec) {
+    if (li->is_stack_exec) {
         prot |= PROT_EXEC;
     }
-    if ((stack.base = mmap(NULL, stack_sz + 1, prot, flags, -1, 0)) == MAP_FAILED) {
-        perror("mmap()");
-        exit(errno);
+
+    stack->_base = mmap(NULL, sz + 1, prot, flags, -1, 0);
+    if (stack->_base == MAP_FAILED) {
+        return -errno;
     }
-    dbg_set_map_name(stack.base, stack_sz + 1, "stack");
-    stack.base += stack_sz;
+    dbg_set_map_name(stack->_base, sz + 1, "stack");
+    stack->_base += sz;
+
+    return 0;
+}
+
+testable_c(static) void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *loadinfo, struct main_args *margs)
+{
+    stack_t stack; /* This points to the top of the stack */
+    rlim_t stack_sz = get_stack_size();
+    struct strtable* st;
+
+    if (make_stack(&stack, stack_sz, loadinfo) < 0) {
+        fprintf(stderr, "make_stack(): %s", strerror(errno));
+        exit(1);
+    }
 
     st = calloc(1, sizeof(struct strtable));
     make_strtable(&stack, st, margs);
@@ -658,27 +694,21 @@ testable_c(static) void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *load
      * takes care of the rest.
      */
     assert(STACK_ALIGN >= ARGC_STORE_SZ);
-    stack.pos = ALIGN_STACK(stack.pos, STACK_ALIGN);
+    stack_align(&stack, STACK_ALIGN);
     if ((st->arg.sz + st->env.sz) % STACK_ALIGN == 0) {
-        stack.pos += ARGC_STORE_SZ;
+        stack_add(&stack, ARGC_STORE_SZ);
     }
 
     assert(st->auxv_sz % STACK_ALIGN == 0);
     assert(st->arg.sz % sizeof(size_t) == 0);
     assert(st->env.sz % sizeof(size_t) == 0);
 
-    stack.pos += st->auxv_sz;
-    memcpy(stack_curr(stack), st->auxv, st->auxv_sz);
-
-    stack.pos += st->env.sz;
-    memcpy(stack_curr(stack), st->env.p, st->env.sz);
-
-    stack.pos += st->arg.sz;
-    memcpy(stack_curr(stack), st->arg.v, st->arg.sz);
+    copy_to_stack(&stack, st->auxv, st->auxv_sz);
+    copy_to_stack(&stack, st->env.p, st->env.sz);
+    copy_to_stack(&stack, st->arg.v, st->arg.sz);
 
     assert((size_t)stack_curr(stack) % STACK_ALIGN == ARGC_STORE_SZ);
-    stack.pos += ARGC_STORE_SZ;
-    *(int*)stack_curr(stack) = st->arg.c;
+    copy_to_stack(&stack, &st->arg.c, ARGC_STORE_SZ);
     free_strtable(st);
 
     assert((size_t)stack_curr(stack) % STACK_ALIGN == 0);

@@ -10,6 +10,8 @@
 
 void test_append_to_maptable(void);
 void test_dup_stack(void);
+void test_copy_to_stack(void);
+
 void helper_test_dup_stack(
     char const *elf_fpath, char const *auxv_fpath_input, char const *auxv_fpath_expected,
     struct main_args *margs, struct loadinfo *li
@@ -155,4 +157,30 @@ void test_dup_stack_missing_required_entries(void)
     };
 
     helper_test_dup_stack("elf1.bin", "auxv2.bin", "auxv1.bin", &margs, &li);
+}
+
+void test_copy_to_stack(void)
+{
+    stack_t stack;
+    struct loadinfo li;
+    memset(&li, 0, sizeof(li));
+    li.is_stack_exec = false;
+
+    TEST_ASSERT(!make_stack(&stack, 32768, &li));
+
+    char const s1[] = "Hello, world!";
+    char const s2[] = "AAAAAAAAAAAAAAAAAAAA";
+    char const s3[] = "";
+
+    char const *r1, *r2, *r3, *r4;
+    r1 = copy_to_stack(&stack, s1, -1);
+    r2 = copy_to_stack(&stack, s2, -1);
+    r3 = copy_to_stack(&stack, s3, -1);
+
+    TEST_ASSERT_EQUAL_STRING(s1, r1);
+    TEST_ASSERT_EQUAL_STRING(s2, r2);
+    TEST_ASSERT_EQUAL_STRING(s3, r3);
+
+    r4 = copy_to_stack(&stack, "BBBBAA", 4);
+    TEST_ASSERT_EQUAL_STRING("BBBB", r4);
 }
