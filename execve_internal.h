@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <stdbool.h>
 
+#include "config.h"
+
 #if defined(__x86_64__)
 #define WORD_SIZE 64
 #elif defined(__i386__)
