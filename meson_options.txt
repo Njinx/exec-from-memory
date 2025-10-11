@@ -1,10 +1,4 @@
 option(
-    'debugg',
-    type: 'boolean',
-    value: false,
-    description: 'Enable/disable various debugging facilities',
-)
-option(
     'payload',
     type: 'string',
     value: '',
@@ -17,13 +11,24 @@ option(
     description: 'AES key to use for payload encryption/decryption',
 )
 option(
-    'interp',
-    type: 'string',
-    description: 'Override the interpreter',
+    'debugg',
+    type: 'boolean',
+    value: false,
+    description: 'Enable/disable various debugging facilities',
 )
 option(
     'stack_size',
     type: 'integer',
     value: -1,
     description: 'The stack size of the exec\'d process. RLIMIT_STACK if unspecified',
+)
+option(
+    'interp',
+    type: 'string',
+    description: 'Override the interpreter',
+)
+option(
+    'python',
+    type: 'string',
+    description: 'Path to Python executable to use during building',
 )

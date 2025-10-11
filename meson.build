@@ -1,6 +1,7 @@
 project('exec-from-memory', 'c', default_options: ['c_std=c99'], meson_version: '>=1.3.0')
 
 fs = import('fs')
+py = import('python')
 cmake = import('cmake')
 
 conf = configuration_data()
@@ -10,6 +11,7 @@ opt_payload_path = get_option('payload')
 opt_aes_key = get_option('aes_key')
 opt_stack_size = get_option('stack_size')
 opt_debugg = get_option('debugg')
+opt_python = get_option('python')
 
 if opt_payload_path == ''
     error('-Dpayload not specified')
@@ -25,6 +27,12 @@ elif opt_stack_size != -1
     conf.set('STACK_SIZE', opt_stack_size)
 endif
 
+if opt_python == ''
+    python_bin = py.find_installation('python3', required: true).full_path()
+else
+    python_bin = opt_python
+endif
+
 conf.set('INTERP_OVERRIDE', '"@0@"'.format(opt_interp))
 conf.set('DEBUGG', opt_debugg)
 
@@ -33,8 +41,9 @@ if not fs.is_absolute(opt_payload_path)
 endif
 
 pack_args = [
-    './pack.py',
-    '--input', opt_payload_path,
+    python_bin,
+    meson.project_source_root() / 'pack.py',
+    '--prog', opt_payload_path,
     '--outdir', '.',
     '--key', opt_aes_key,
 ]

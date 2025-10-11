@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import typing as t
 import os
 import sys
@@ -7,7 +5,6 @@ import io
 import binascii
 import argparse
 import string
-import struct
 from collections.abc import Sequence
 
 from Crypto.Cipher import AES as aes
@@ -24,9 +21,10 @@ def parse_args() -> None:
     global args
 
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--input', '-i', type=str, required=True, nargs='?')
-    argparser.add_argument('--outdir', '-o', type=str, required=True, nargs='?')
-    argparser.add_argument('--key', '-k', type=str, required=True, nargs='?')
+    argparser.add_argument('--prog', type=str, required=True, nargs='?')
+    argparser.add_argument('--interp', type=str, required=False, nargs='?')
+    argparser.add_argument('--outdir', type=str, required=True, nargs='?')
+    argparser.add_argument('--key', type=str, required=True, nargs='?')
 
     args = argparser.parse_args()
 
@@ -176,13 +174,13 @@ def main() -> None:
     parse_args()
 
     try:
-        os.stat(args.input)
+        os.stat(args.prog)
     except FileNotFoundError:
         argparser.print_usage(sys.stderr)
         sys.exit(1)
 
     plaintext: bytes
-    with open(args.input, 'rb') as src_fp:
+    with open(args.prog, 'rb') as src_fp:
         plaintext = src_fp.read()
 
     validate_prog(plaintext)
