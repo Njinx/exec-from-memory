@@ -13,7 +13,6 @@
 #include <unistd.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
-#include <limits.h>
 
 #include <cvector.h>
 
@@ -24,10 +23,10 @@
 static void free_strtable(struct strtable* st);
 static void make_strtable(stack_t *stack, struct strtable *st, struct main_args *margs);
 static bool handle_auxv_ent(stack_t *stack, struct auxinfo* info, auxv_t* ent);
-static int reprotect_maps();
-static int map_segment(ElfW(Phdr) const *phdr, uint8_t const *bytes, uint8_t const* base_addr, size_t base_addr_sz, errstr_t errstr);
+static int reprotect_maps(void);
+static int map_segment(uint8_t const *bytes, int phdr_idx, uint8_t const *base_addr, size_t base_addr_sz, errstr_t errstr);
 static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr);
-static long read_interp(uint8_t const *bytes, ElfW(Phdr) const *phdr, uint8_t **data, errstr_t errstr);
+static long read_interp(uint8_t const *bytes, int phdr_idx, uint8_t **data, errstr_t errstr);
 static long page_size();
 static void jmp_to_payload(uint8_t const *addr, uint8_t *sp);
 static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name);
@@ -79,10 +78,15 @@ static long page_size()
     return _page_sz;
 }
 
-static long read_interp(uint8_t const *bytes, ElfW(Phdr) const *phdr, uint8_t **data, errstr_t errstr)
+/* Reads the interpreter program segment specified by PHDR_IDX from BYTES elf and
+ * stores the pointer in DATA and returning the read size. DATA should be free'd
+ * with munmap().
+ */
+static long read_interp(uint8_t const *bytes, int phdr_idx, uint8_t **data, errstr_t errstr)
 {
     char const *path;
     struct stat info;
+    ElfW(Phdr) const *phdr = PHDR(bytes, phdr_idx);
     FILE *fp;
 
     assert(phdr->p_type == PT_INTERP);
@@ -111,6 +115,9 @@ static long read_interp(uint8_t const *bytes, ElfW(Phdr) const *phdr, uint8_t **
     return info.st_size;
 }
 
+/* Perform basic elf validity checks on BYTES. Returns 0 on success and -1 when
+ * a check has failed, setting ERRSTR.
+ */
 static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr)
 {
     ElfW(Ehdr) const*ehdr = EHDR(bytes);
@@ -135,7 +142,10 @@ static int check_prog(uint8_t const *bytes, size_t len, errstr_t errstr)
     return 0;
 }
 
-testable_c(static) int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *loadinfo, bool is_interp, errstr_t errstr)
+/* Maps BYTES elf of length LEN into memory, storing results in LI. Set
+ * IS_INTERP to indicate that the elf is the interpreter.
+ */
+testable_c(static) int load_elf(uint8_t const *bytes, size_t len, struct loadinfo *li, bool is_interp, errstr_t errstr)
 {
     ElfW(Ehdr) const *ehdr = EHDR(bytes);
     ElfW(Phdr) const *phdr;
@@ -148,6 +158,7 @@ testable_c(static) int load_elf(uint8_t const *bytes, size_t len, struct loadinf
         return -1;
     }
 
+    /* Find the total mapped size according to SysV gABI */
     base_addr_sz = 0;
     for (int i = 0; i < ehdr->e_phnum; i++) {
         phdr = PHDR(bytes, i);
@@ -175,6 +186,7 @@ testable_c(static) int load_elf(uint8_t const *bytes, size_t len, struct loadinf
         perror("mmap()");
         exit(errno);
     }
+    /* Linux initializes the region to zero. Keeping this for other platforms */
     memset(base_addr + base_addr_sz, 0, base_addr_sz - base_addr_sz);
 
     uint8_t *interp_data;
@@ -184,16 +196,16 @@ testable_c(static) int load_elf(uint8_t const *bytes, size_t len, struct loadinf
 
         if (phdr->p_type == PT_INTERP) {
             if (is_dyn) {
-                fprintf(stderr, "Multiple .interp sections present\n");
-                exit(EXIT_FAILURE);
+                *errstr = "Multiple .interp sections present";
+                return -1;
             }
 
             is_dyn = true;
-            interp_len = read_interp(bytes, phdr, &interp_data, errstr);
+            interp_len = read_interp(bytes, i, &interp_data, errstr);
             if (interp_len < 0) {
                 return -1;
             }
-            if (load_elf(interp_data, interp_len, loadinfo, true, errstr) < 0) {
+            if (load_elf(interp_data, interp_len, li, true, errstr) < 0) {
                 munmap(interp_data, interp_len);
                 return -1;
             }
@@ -201,38 +213,41 @@ testable_c(static) int load_elf(uint8_t const *bytes, size_t len, struct loadinf
             continue;
         }
 
+        // TODO: Is this portable? Sure GNU isn't the only platform allowing an executable stack?
         if (phdr->p_type == PT_GNU_STACK && phdr->p_flags & PF_X) {
-            loadinfo->is_stack_exec = true;
+            li->is_stack_exec = true;
         }
 
+        /* Only map loadable segments */
         if (phdr->p_type != PT_LOAD) {
             continue;
         }
 
         // TODO: How to properly do errors? Maybe Go-like chaining with an array of error strings?
-        if (map_segment(phdr, bytes, base_addr, base_addr_sz, errstr) < 0) {
+        if (map_segment(bytes, i, base_addr, base_addr_sz, errstr) < 0) {
             return -1;
         }
     }
 
     if (is_dyn || !is_interp) {
-        loadinfo->prog_base_addr = base_addr;
-        loadinfo->prog_entry = ehdr->e_entry;
+        li->prog_base_addr = base_addr;
+        li->prog_entry = ehdr->e_entry;
     } else {
-        loadinfo->interp_base_addr = base_addr;
-        loadinfo->interp_entry = ehdr->e_entry;
+        li->interp_base_addr = base_addr;
+        li->interp_entry = ehdr->e_entry;
     }
 
     *errstr = NULL;
     return 0;
 }
 
-static void *get_entrypoint(struct loadinfo *loadinfo)
+/* Returns the program entrypoint. */
+static void *get_entrypoint(struct loadinfo *li)
 {
-    if (loadinfo->interp_base_addr) {
-        return loadinfo->interp_base_addr + loadinfo->interp_entry;
+    if (li->interp_base_addr) {
+        return li->interp_base_addr + li->interp_entry;
     } else {
-        return loadinfo->prog_base_addr + loadinfo->prog_entry;
+        return li->prog_base_addr + li->prog_entry;
     }
 }
 
@@ -286,7 +301,10 @@ testable_c(static) void append_to_maptable(struct mapinfo map)
     cvector_push_back(maptable, map);
 }
 
-static int reprotect_maps()
+/* All maps need to be writable during creating. This procedure restores the
+ * intended protection.
+ */
+static int reprotect_maps(void)
 {
     struct mapinfo *map;
 
@@ -309,6 +327,9 @@ static void dbg_set_map_name(uint8_t const *ptr, size_t sz, char const *name)
 #endif
 }
 
+/* Maps the program header type name from PHDR into NAME, returning the length
+ * of NAME. NAME should be free'd with free().
+ */
 static int phdr_name(ElfW(Phdr) const *phdr, char **name)
 {
     char const *pt;
@@ -316,6 +337,7 @@ static int phdr_name(ElfW(Phdr) const *phdr, char **name)
     char const *fmt = "%s:0x%06lx:%s";
     int len;
 
+    // TODO: Should we autogenerate these from system header files?
 #define pt_case(type) case type: pt = #type; break;
     switch (phdr->p_type) {
     pt_case(PT_NULL)
@@ -350,10 +372,16 @@ static int phdr_name(ElfW(Phdr) const *phdr, char **name)
     return snprintf(*name, len, fmt, prot, phdr->p_offset, pt);
 }
 
-static int map_segment(ElfW(Phdr) const *phdr, uint8_t const *bytes, uint8_t const *base_addr, size_t base_addr_sz, errstr_t errstr)
+/* Map a program segment specified by PHDR_IDX from BYTES elf into memory at
+ * BASE_ADDR. BASE_ADDR_SZ should be the total size of our parent map and is
+ * used to sanity check that our map isn't out-of-bounds. Returns 0 on success
+ * and -1 on error, setting ERRSTR.
+ */
+static int map_segment(uint8_t const *bytes, int phdr_idx, uint8_t const *base_addr, size_t base_addr_sz, errstr_t errstr)
 {
     int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED;
     int prot = PROT_NONE;
+    ElfW(Phdr) const *phdr = PHDR(bytes, phdr_idx);
     bool needs_reprotect;
     uint8_t const *addr;
     uint8_t *aligned_addr, *seg;
@@ -361,6 +389,11 @@ static int map_segment(ElfW(Phdr) const *phdr, uint8_t const *bytes, uint8_t con
     char *name;
 
     addr = base_addr + phdr->p_vaddr;
+    /* We can only create maps with page granularity, but need our segments to
+     * be mapped at precise offsets. The solution is to round our vaddr down to
+     * the nearest page while mapping an extra page at the end, then add the
+     * desired offset to the mapped address.
+     */
     aligned_addr = (void *)PAGE_FLOOR(addr);
     sz = phdr->p_memsz + (addr - aligned_addr);
 
@@ -416,11 +449,12 @@ void stack_add(stack_t *stack, size_t n)
 
 void stack_align(stack_t *stack, size_t n)
 {
-    size_t aligned = ALIGN_STACK(stack->_pos, STACK_ALIGN);
+    size_t aligned = ALIGN_STACK(stack->_pos, n);
     _stack_assert_has_cap(stack, aligned);
     stack->_pos = aligned;
 }
 
+/* Copy SRC of size SZ to STACK. If SZ is -1, calculate the size with strlen(). */
 testable_c(static) void *copy_to_stack(stack_t *stack, void const *src, ssize_t sz)
 {
     if (sz == -1) {
@@ -432,8 +466,10 @@ testable_c(static) void *copy_to_stack(stack_t *stack, void const *src, ssize_t 
     return stack_curr(*stack);
 }
 
-/* Returns whether or not the entry should be added to the auxiliary vector */
-static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
+/* Returns whether or not ENT should be added to the auxiliary vector, modifying
+ * ENT if necessary. INFO should contain relevant auxiliary vector values.
+ */
+static bool handle_auxv_ent(stack_t *stack, struct auxinfo *info, auxv_t *ent)
 {
     switch (ent->a_type) {
     case AT_EXECFD:
@@ -516,10 +552,14 @@ static bool handle_auxv_ent(stack_t* stack, struct auxinfo* info, auxv_t* ent)
     }
 }
 
-testable_c(static) void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct strtable* st)
+/* Derive an auxiliary vector from our programs (not the exec'd programs) auxiliary
+ * vector. Writing string table values to STACK and storing storing their pointers in
+ * ST. Required auxv_t entries will be created if necessary.
+ */
+testable_c(static) void dup_auxv(stack_t *stack, struct auxinfo *auxinfo, struct strtable *st)
 {
     cvector(auxv_t) auxv_tmp = NULL;
-    FILE* fp;
+    FILE *fp;
     size_t n;
     auxv_t auxv_ent;
     size_t const required_at[] = { AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM };
@@ -581,6 +621,7 @@ testable_c(static) void dup_auxv(stack_t* stack, struct auxinfo* auxinfo, struct
     fclose(fp);
 }
 
+/* Add argv and envp from MARGS to STACK, storing their pointers in ST. */
 static void make_strtable(stack_t *stack, struct strtable *st, struct main_args *margs)
 {
     int i;
@@ -665,13 +706,17 @@ testable_c(static) int make_stack(stack_t *stack, size_t sz, struct loadinfo *li
     return 0;
 }
 
-testable_c(static) void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *loadinfo, struct main_args *margs)
+/* Create a stack derived from elf header EHDR and argv and envp in MARGS.
+ * Storing execution information in LI and returning a pointer to the base of
+ * the stack.
+ */
+testable_c(static) void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *li, struct main_args *margs)
 {
     stack_t stack; /* This points to the top of the stack */
     rlim_t stack_sz = get_stack_size();
     struct strtable* st;
 
-    if (make_stack(&stack, stack_sz, loadinfo) < 0) {
+    if (make_stack(&stack, stack_sz, li) < 0) {
         fprintf(stderr, "make_stack(): %s", strerror(errno));
         exit(1);
     }
@@ -680,13 +725,13 @@ testable_c(static) void *dup_stack(ElfW(Ehdr) const *ehdr, struct loadinfo *load
     make_strtable(&stack, st, margs);
 
     struct auxinfo auxinfo = {
-        .phdr = loadinfo->prog_base_addr + ehdr->e_phoff,
+        .phdr = li->prog_base_addr + ehdr->e_phoff,
         .phent = ehdr->e_phentsize,
         .phnum = ehdr->e_phnum,
     };
 
-    auxinfo.base = loadinfo->interp_base_addr ? loadinfo->interp_base_addr : NULL;
-    auxinfo.entry = loadinfo->prog_base_addr + loadinfo->prog_entry;
+    auxinfo.base = li->interp_base_addr ? li->interp_base_addr : NULL;
+    auxinfo.entry = li->prog_base_addr + li->prog_entry;
 
     dup_auxv(&stack, &auxinfo, st);
 
